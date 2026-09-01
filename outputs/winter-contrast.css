@@ -1,0 +1,12 @@
+body.winter .card h2{color:#294f4b!important;font-weight:800}
+body.winter .card h2::before{color:#ad6d35!important;font-weight:900!important;opacity:1!important;text-shadow:0 1px 0 #fff,0 0 1px #7b4b25}
+body.winter .auth-card h2,body.winter #setup h2,body.winter #coach h2{color:#294f4b!important;font-weight:800}
+body.winter .auth-mode,body.winter .auth-label{color:#345d58!important}
+body.winter .study-decor span{color:#355f59;border-color:#abcac4;box-shadow:0 4px 10px #355f5924}
+body.winter .decor.pencil{opacity:.86!important;filter:saturate(1.4) sepia(.12) contrast(1.12) drop-shadow(0 3px 4px #6f4b2d38)!important}
+
+/* 上方文具改為柔和彩色圖形，避免系統 Emoji 呈現黑白色。 */
+.study-decor span:nth-child(2),.study-decor span:nth-child(8){font-size:0;position:relative;overflow:visible}
+.study-decor span:nth-child(2)::before{content:"";width:22px;height:22px;display:block;background:linear-gradient(135deg,#f4b86f 0 48%,#e78372 49% 100%);clip-path:polygon(8% 92%,50% 8%,92% 92%,70% 92%,50% 50%,30% 92%);filter:drop-shadow(0 1px 1px #8b604044)}
+.study-decor span:nth-child(2)::after{content:"";position:absolute;width:7px;height:7px;left:14px;top:15px;background:#fffef9;clip-path:polygon(0 100%,50% 0,100% 100%)}
+.study-decor span:nth-child(8)::before{content:"";display:block;width:24px;height:9px;border-radius:3px;background:repeating-linear-gradient(90deg,transparent 0 3px,#946d3e 3px 4px),linear-gradient(90deg,#f1c95f,#e99a5f);border:1px solid #b67843;transform:rotate(-12deg);box-shadow:0 1px 2px #7c593333}

@@ -1,0 +1,30 @@
+name: Security and role tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        run: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run isolated role and security audit
+        env:
+          NODE_ENV: development
+          DEVELOPER_EMAIL: a0975895067@gmail.com
+          DEVELOPER_PASSWORD: Audit-Only-Strong-Password-2026!
+          SESSION_SECRET: ci-session-secret-${{ matrix.run }}-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789
+          OTP_SECRET: ci-otp-secret-${{ matrix.run }}-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789
+          DATA_ENCRYPTION_KEY: ci-data-secret-${{ matrix.run }}-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789
+          DATABASE_PATH: ${{ runner.temp }}/security-${{ matrix.run }}.sqlite
+          AUDIT_RUN_ID: github-${{ matrix.run }}
+        run: node tmp/security-role-audit.mjs
+      - name: Verify GitHub Pages anonymous build
+        run: node github-deploy/verify-static.mjs

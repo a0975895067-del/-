@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>數學任務站｜學習管理中心</title>
+  <link rel="stylesheet" href="teacher-dashboard.css?v=20260901-secure1">
+  <script src="api-config.js?v=20260901-01"></script>
+  <script src="secure-dashboard.js?v=20260901-secure1" defer></script>
+</head>
+<body>
+  <main>
+    <header class="dash-hero">
+      <p class="eyebrow">🌿 數學任務站 · 安全權限後台</p>
+      <h1 id="dashTitle">學習管理中心</h1>
+      <p id="who">正在確認登入身分…</p>
+      <a href="數學任務站.html">返回數學任務站</a>
+    </header>
+    <section id="loading" class="card"><p>正在從安全後端讀取資料，請稍候。</p></section>
+    <section id="denied" class="card denied hidden"><h2>無法開啟後台</h2><p id="deniedMessage">此頁只提供已核准教師與開發者使用。</p></section>
+    <div id="app" class="hidden">
+      <p class="notice">🔒 所有班級、學生、申請與報告資料皆由伺服器依登入角色篩選；本頁不使用瀏覽器本機儲存作為權限依據。</p>
+      <nav id="tabs" class="tabs" aria-label="後台功能"></nav>
+      <section id="overview" class="card panel"></section>
+      <section id="applications" class="card panel"></section>
+      <section id="classes" class="card panel"></section>
+      <section id="assignments" class="card panel"></section>
+      <section id="analytics" class="card panel"></section>
+      <section id="reports" class="card panel"></section>
+    </div>
+  </main>
+</body>
+</html>

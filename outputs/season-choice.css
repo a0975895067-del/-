@@ -1,0 +1,24 @@
+.theme-switch{align-items:stretch;gap:12px}
+.theme-switch .theme{min-width:172px;min-height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;border-width:2px;line-height:1.35;white-space:normal;font-size:0}
+.theme-switch .theme::before{display:block;font-size:1rem;font-weight:800;line-height:1.35}
+.theme-switch .theme::after{display:block;max-width:155px;font-size:.78rem;font-weight:700;letter-spacing:.03em;line-height:1.4;opacity:.92}
+.theme-switch .theme[data-theme="spring"]{color:#356b4d;background:#f0fae9;border-color:#9bc894}
+.theme-switch .theme[data-theme="spring"]::before{content:"🌸 春季"}
+.theme-switch .theme[data-theme="spring"]::after{content:"心之所向，逐夢啟航";color:#4b805b}
+.theme-switch .theme[data-theme="summer"]{color:#236d7d;background:#e8f8fb;border-color:#83c9d2}
+.theme-switch .theme[data-theme="summer"]::before{content:"☀️ 夏季"}
+.theme-switch .theme[data-theme="summer"]::after{content:"晴光正亮，勇氣高漲";color:#397f8d}
+.theme-switch .theme[data-theme="autumn"]{color:#8a4e2f;background:#fff2df;border-color:#dba66e}
+.theme-switch .theme[data-theme="autumn"]::before{content:"🍁 秋季"}
+.theme-switch .theme[data-theme="autumn"]::after{content:"金葉飄香，收穫滿囊";color:#9a633c}
+.theme-switch .theme[data-theme="winter"]{color:#385b70;background:#eef5fa;border-color:#9bb8cb}
+.theme-switch .theme[data-theme="winter"]::before{content:"❄️ 冬季"}
+.theme-switch .theme[data-theme="winter"]::after{content:"雪夜微光，思路明朗";color:#527188}
+.theme-switch .theme:hover,.theme-switch .theme.active{color:#fff;transform:translateY(-2px);box-shadow:0 7px 16px #4d675322}
+.theme-switch .theme[data-theme="spring"]:hover,.theme-switch .theme[data-theme="spring"].active{background:#5f9871;border-color:#5f9871}
+.theme-switch .theme[data-theme="summer"]:hover,.theme-switch .theme[data-theme="summer"].active{background:#438fa0;border-color:#438fa0}
+.theme-switch .theme[data-theme="autumn"]:hover,.theme-switch .theme[data-theme="autumn"].active{background:#ad6e45;border-color:#ad6e45}
+.theme-switch .theme[data-theme="winter"]:hover,.theme-switch .theme[data-theme="winter"].active{background:#5c7d94;border-color:#5c7d94}
+.theme-switch .theme:hover::after,.theme-switch .theme.active::after{color:#fff}
+@media(max-width:760px){.theme-switch .theme{min-width:calc(50% - 8px);flex:1 1 calc(50% - 8px)}}
+@media(max-width:430px){.theme-switch .theme{min-width:100%;flex-basis:100%}}

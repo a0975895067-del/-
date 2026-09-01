@@ -1,0 +1,12 @@
+.git
+.github
+github-deploy
+node_modules
+renders
+tmp
+work
+*.zip
+*.pdf
+secure-backend/data
+secure-backend/.env
+**/*.sqlite*

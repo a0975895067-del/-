@@ -1,0 +1,8 @@
+.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+data/
+secure-backend/data/
+node_modules/
+*.log
