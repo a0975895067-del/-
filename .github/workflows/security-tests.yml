@@ -25,6 +25,6 @@ jobs:
           DATA_ENCRYPTION_KEY: ci-data-secret-${{ matrix.run }}-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789
           DATABASE_PATH: ${{ runner.temp }}/security-${{ matrix.run }}.sqlite
           AUDIT_RUN_ID: github-${{ matrix.run }}
-        run: node tmp/security-role-audit.mjs
+        run: node secure-backend/test-security.mjs
       - name: Verify GitHub Pages anonymous build
         run: node github-deploy/verify-static.mjs
