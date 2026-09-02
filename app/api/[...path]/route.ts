@@ -418,12 +418,16 @@ async function handle(request: Request) {
       return json({ teachers: await Promise.all(result.results.map(async row => ({ id: row.id, email: await unseal(row.email_cipher) }))) });
     }
     if (method === 'GET' && path === '/api/invitations') {
-      await authenticate(request, ['developer']); const rows = await cf().DB.prepare('SELECT id,role,class_id,email_lookup,uses_remaining,expires_at,created_at FROM invitation_codes ORDER BY created_at DESC LIMIT 500').all<Row>();
+      const session = await authenticate(request, ['developer', 'teacher']); const rows = session.role === 'developer'
+        ? await cf().DB.prepare('SELECT id,role,class_id,email_lookup,uses_remaining,expires_at,created_at FROM invitation_codes ORDER BY created_at DESC LIMIT 500').all<Row>()
+        : await cf().DB.prepare('SELECT id,role,class_id,email_lookup,uses_remaining,expires_at,created_at FROM invitation_codes WHERE created_by=? ORDER BY created_at DESC LIMIT 500').bind(session.user_id).all<Row>();
       return json({ invitations: rows.results.map(row => ({ ...row, emailBound: Boolean(row.email_lookup), email_lookup: undefined })) });
     }
     if (method === 'POST' && path === '/api/invitations') {
-      const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const data = await body(request), role = data.role === 'teacher' ? 'teacher' : 'student', count = Math.min(40, Math.max(1, Number(data.count) || 1)), days = Math.min(30, Math.max(1, Number(data.expiresInDays) || 7));
+      const session = await authenticate(request, ['developer', 'teacher']); await requireCsrf(request, session); const data = await body(request), role = data.role === 'teacher' ? 'teacher' : 'student', count = Math.min(40, Math.max(1, Number(data.count) || 1)), days = Math.min(30, Math.max(1, Number(data.expiresInDays) || 7));
+      if (session.role === 'teacher' && role !== 'student') throw new ApiError('教師只能替自己任教班級產生學生啟用碼。', 403);
       const classId = role === 'student' ? textValue(data.classId, 80) : null; if (classId && !(await cf().DB.prepare('SELECT id FROM classes WHERE id=?').bind(classId).first())) throw new ApiError('找不到指定班級。', 404);
+      if (session.role === 'teacher' && (!classId || !(await cf().DB.prepare('SELECT id FROM classes WHERE id=? AND teacher_id=?').bind(classId, session.user_id).first()))) throw new ApiError('您只能替自己任教的班級產生啟用碼。', 403);
       const boundEmail = normalizeEmail(data.email), boundLookup = boundEmail ? await emailLookup(boundEmail) : null; if (role === 'teacher' && !boundEmail) throw new ApiError('教師啟用碼必須綁定教師信箱。');
       const expiresAt = new Date(Date.now() + days * 86400_000).toISOString(), codes: string[] = [];
       for (let index = 0; index < count; index++) { const code = inviteCode(); await cf().DB.prepare('INSERT INTO invitation_codes(id,code_digest,role,class_id,email_lookup,uses_remaining,expires_at,created_by,created_at) VALUES(?,?,?,?,?,1,?,?,?)').bind(uuid(), await hmac(`invite:${code.replace(/\s/g, '')}`), role, classId, boundLookup, expiresAt, session.user_id, now()).run(); codes.push(code); }
