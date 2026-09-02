@@ -1,0 +1,12 @@
+/* 世界旅學水彩底圖：中央留白，四季只改變柔和濾色。 */
+body,body.spring{background-image:linear-gradient(180deg,#f6fff175,#eff9e768),url("assets/season-spring-new-zealand-v1.png")!important;background-position:center top!important;background-size:cover!important;background-repeat:no-repeat!important;background-attachment:fixed!important}
+body.summer{background-image:linear-gradient(180deg,#e9fbff66,#edf9ee58),url("assets/season-summer-fireworks-v1.png")!important}
+body.autumn{background-image:linear-gradient(180deg,#fff7e86b,#f8ead75e),url("assets/season-autumn-japan-maples-v1.png")!important}
+body.winter{background-image:linear-gradient(180deg,#eef7fc72,#f4f7f868),url("assets/season-winter-matterhorn-v1.png")!important}
+body::before{background:linear-gradient(180deg,transparent 0 64%,#e8f1e2a8 100%)!important;height:100vh!important;opacity:.28!important}
+body.summer::before{background:linear-gradient(180deg,transparent 0 64%,#dcefe5a8 100%)!important}
+body.autumn::before{background:linear-gradient(180deg,transparent 0 64%,#efddc7a8 100%)!important}
+body.winter::before{background:linear-gradient(180deg,transparent 0 64%,#dfe9e8a8 100%)!important}
+.hero,.card{background:color-mix(in srgb,var(--card) 88%,transparent)!important;backdrop-filter:blur(8px) saturate(.92)}
+@media(max-width:760px){body,body.spring,body.summer,body.autumn,body.winter{background-position:58% top!important;background-size:auto 100vh!important}.hero,.card{background:color-mix(in srgb,var(--card) 93%,transparent)!important}}
+@media(prefers-reduced-motion:reduce){body,body.spring,body.summer,body.autumn,body.winter{background-attachment:scroll!important}}

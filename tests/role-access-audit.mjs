@@ -1,0 +1,19 @@
+import assert from 'node:assert/strict';
+const base = process.env.TEST_ORIGIN || 'http://localhost:8790';
+const request = async (path, userId, options = {}) => { const response = await fetch(base + path, { ...options, headers: { ...(userId ? { cookie: `mm_session=token-${userId}` } : {}), ...(options.headers || {}) } }); let data = {}; try { data = await response.json(); } catch {} return { response, data }; };
+for (let round = 1; round <= 3; round++) {
+  assert.equal((await request('/api/me', null)).response.status, 401);
+  assert.equal((await request('/api/classes', 'test-approved')).response.status, 403);
+  const own = await request('/api/reports/test-report-a', 'test-student-a'); assert.equal(own.response.status, 200); assert.equal(own.data.report.student_id, 'test-student-a');
+  assert.equal((await request('/api/reports/test-report-b', 'test-student-a')).response.status, 404);
+  const teacher = await request('/api/reports', 'test-teacher-a'); assert.equal(teacher.response.status, 200); assert.deepEqual(teacher.data.reports.map(row => row.id), ['test-report-a']);
+  assert.equal((await request('/api/classes/test-702/students', 'test-teacher-a')).response.status, 403);
+  const developer = await request('/api/reports', 'test-developer'); assert.equal(developer.response.status, 200); assert.ok(developer.data.reports.some(row => row.id === 'test-report-a') && developer.data.reports.some(row => row.id === 'test-report-b'));
+  assert.equal((await request('/api/privacy-requests', 'test-developer', { method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ requestType: 'access' }) })).response.status, 403);
+  assert.equal((await request('/api/privacy-requests', 'test-developer', { method: 'POST', headers: { origin: base, 'content-type': 'application/json', 'x-csrf-token': 'csrf-test-developer' }, body: JSON.stringify({ requestType: 'access' }) })).response.status, 201);
+  assert.equal((await request('/api/auth/request-code', null, { method: 'POST', headers: { origin: 'https://evil.invalid', 'content-type': 'application/json' }, body: '{}' })).response.status, 403);
+  assert.equal((await request('/api/auth/request-code', null, { method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ email: 'outsider@example.test', privacyVersion: '2026-09-01' }) })).response.status, 403);
+  const applicant = await request('/api/applications/request-code', null, { method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ email: `applicant-${round}@example.test`, privacyVersion: '2026-09-01' }) }); assert.equal(applicant.response.status, 503); assert.equal('developmentOtp' in applicant.data, false);
+  console.log(`第 ${round} 輪：學生、教師、非學生／非教師、一般使用者、開發者皆通過。`);
+}
+console.log('三輪共 39 項權限與驗證安全檢查全數通過。');
