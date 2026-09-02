@@ -429,9 +429,16 @@ async function handle(request: Request) {
       const classId = role === 'student' ? textValue(data.classId, 80) : null; if (classId && !(await cf().DB.prepare('SELECT id FROM classes WHERE id=?').bind(classId).first())) throw new ApiError('找不到指定班級。', 404);
       if (session.role === 'teacher' && (!classId || !(await cf().DB.prepare('SELECT id FROM classes WHERE id=? AND teacher_id=?').bind(classId, session.user_id).first()))) throw new ApiError('您只能替自己任教的班級產生啟用碼。', 403);
       const boundEmail = normalizeEmail(data.email), boundLookup = boundEmail ? await emailLookup(boundEmail) : null; if (role === 'teacher' && !boundEmail) throw new ApiError('教師啟用碼必須綁定教師信箱。');
-      const expiresAt = new Date(Date.now() + days * 86400_000).toISOString(), codes: string[] = [];
-      for (let index = 0; index < count; index++) { const code = inviteCode(); await cf().DB.prepare('INSERT INTO invitation_codes(id,code_digest,role,class_id,email_lookup,uses_remaining,expires_at,created_by,created_at) VALUES(?,?,?,?,?,1,?,?,?)').bind(uuid(), await hmac(`invite:${code.replace(/\s/g, '')}`), role, classId, boundLookup, expiresAt, session.user_id, now()).run(); codes.push(code); }
-      await audit(session.user_id, 'invitation.created', 'invitation_batch', '', 'success', { role, classId, count }); return json({ codes, role, classId, expiresAt, notice: '啟用碼只顯示這一次，請安全交付。' }, 201);
+      const expiresAt = new Date(Date.now() + days * 86400_000).toISOString(), codes: string[] = [], invitationIds: string[] = [];
+      for (let index = 0; index < count; index++) { const code = inviteCode(), id = uuid(); await cf().DB.prepare('INSERT INTO invitation_codes(id,code_digest,role,class_id,email_lookup,uses_remaining,expires_at,created_by,created_at) VALUES(?,?,?,?,?,1,?,?,?)').bind(id, await hmac(`invite:${code.replace(/\s/g, '')}`), role, classId, boundLookup, expiresAt, session.user_id, now()).run(); codes.push(code); invitationIds.push(id); }
+      await audit(session.user_id, 'invitation.created', 'invitation_batch', '', 'success', { role, classId, count }); return json({ codes, invitationIds, role, classId, expiresAt, notice: '啟用碼只顯示這一次，請安全交付。' }, 201);
+    }
+    const invitationId = path.match(/^\/api\/invitations\/([^/]+)$/);
+    if (method === 'DELETE' && invitationId) {
+      const session = await authenticate(request, ['developer', 'teacher']); await requireCsrf(request, session); const id = decodeURIComponent(invitationId[1]);
+      const statement = session.role === 'developer' ? cf().DB.prepare('UPDATE invitation_codes SET uses_remaining=0 WHERE id=? AND uses_remaining>0').bind(id) : cf().DB.prepare('UPDATE invitation_codes SET uses_remaining=0 WHERE id=? AND created_by=? AND uses_remaining>0').bind(id, session.user_id);
+      const result = await statement.run(); if (!result.meta.changes) throw new ApiError('找不到啟用碼、已失效或沒有權限。', 404);
+      await audit(session.user_id, 'invitation.revoked', 'invitation', id); return json({ ok: true });
     }
     const classStudents = path.match(/^\/api\/classes\/([^/]+)\/students$/);
     if (method === 'GET' && classStudents) {
@@ -520,3 +527,4 @@ async function decodeReport(row: Row) {
 export const GET = handle;
 export const POST = handle;
 export const PATCH = handle;
+export const DELETE = handle;
