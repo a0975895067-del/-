@@ -219,11 +219,11 @@ async function requireCsrf(request: Request, session: Row) {
   if (!token || !(await safeEqual(session.csrf_digest, await digest(token)))) throw new ApiError('安全驗證已失效，請重新整理頁面。', 403);
 }
 
-async function makeApplication(row: Row, data: Row) {
+async function makeApplication(row: Row, data: Row, emailVerified = true) {
   const identity = textValue(data.identity, 80), workplace = textValue(data.workplace, 120), jobTitle = textValue(data.jobTitle, 120);
   const id = uuid();
-  await cf().DB.prepare("INSERT INTO access_applications(id,email_lookup,email_cipher,identity_cipher,workplace_cipher,job_title_cipher,status,requested_at) VALUES(?,?,?,?,?,?,'pending',?)")
-    .bind(id, row.email_lookup, row.email_cipher, await seal(identity), await seal(workplace), await seal(jobTitle), now()).run();
+  await cf().DB.prepare("INSERT INTO access_applications(id,email_lookup,email_cipher,identity_cipher,workplace_cipher,job_title_cipher,email_verified,status,requested_at) VALUES(?,?,?,?,?,?,?,'pending',?)")
+    .bind(id, row.email_lookup, row.email_cipher, await seal(identity), await seal(workplace), await seal(jobTitle), emailVerified ? 1 : 0, now()).run();
   return { id, status: 'pending' };
 }
 
@@ -331,13 +331,15 @@ async function handle(request: Request) {
       const data = await body(request), email = normalizeEmail(data.email), code = String(data.invitationCode || '').toUpperCase().replace(/\s/g, ''); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
       await rateLimit(`invitation:${await ipDigest(request)}`, 20, 15 * 60); const invitation = await cf().DB.prepare('SELECT * FROM invitation_codes WHERE code_digest=?').bind(await hmac(`invite:${code}`)).first<Row>();
       if (!invitation || Number(invitation.uses_remaining) < 1 || Date.parse(invitation.expires_at) <= Date.now() || (invitation.email_lookup && invitation.email_lookup !== await emailLookup(email))) throw new ApiError('一次性啟用碼錯誤或已失效。', 401);
-      const profile = invitation.role === 'student' ? studentProfile(email) : null; if (invitation.role === 'student' && !profile) throw new ApiError('學生必須使用符合規則的龍門國中信箱。', 403);
+      const profile = invitation.role === 'student' ? studentProfile(email) : null, targetClass = invitation.class_id ? await cf().DB.prepare('SELECT * FROM classes WHERE id=?').bind(invitation.class_id).first<Row>() : null, customStudent = invitation.role === 'student' && !profile && targetClass && Number(targetClass.class_number) === 0 && Boolean(invitation.email_lookup);
+      if (invitation.role === 'student' && !profile && !customStudent) throw new ApiError('校內學生須使用龍門國中信箱；個人帳號須使用綁定信箱的自訂班級啟用碼。', 403);
       if (profile && invitation.class_id && invitation.class_id !== profile.code && invitation.class_id !== `test-${profile.code}`) throw new ApiError('此啟用碼不屬於您的班級。', 403);
       let user = await findUser(email); const timestamp = now(), userId = user?.id || uuid(), salt = randomToken(24), digestValue = await passwordDigest(String(data.password || ''), salt), statements = [cf().DB.prepare('UPDATE invitation_codes SET uses_remaining=uses_remaining-1 WHERE id=? AND uses_remaining>0').bind(invitation.id)];
-      if (!user) statements.push(cf().DB.prepare("INSERT INTO users(id,email_lookup,email_cipher,role,status,grade,class_number,seat_number,created_at,updated_at) VALUES(?,?,?,?, 'active',?,?,?,?,?)").bind(userId, await emailLookup(email), await seal(email), invitation.role, profile?.grade ?? null, profile?.classNumber ?? null, profile?.seatNumber ?? null, timestamp, timestamp));
-      else statements.push(cf().DB.prepare("UPDATE users SET role=?,status='active',grade=?,class_number=?,seat_number=?,updated_at=? WHERE id=?").bind(invitation.role, profile?.grade ?? user.grade, profile?.classNumber ?? user.class_number, profile?.seatNumber ?? user.seat_number, timestamp, userId));
+      const assignedGrade = profile?.grade ?? targetClass?.grade ?? null, assignedClassNumber = profile?.classNumber ?? targetClass?.class_number ?? null;
+      if (!user) statements.push(cf().DB.prepare("INSERT INTO users(id,email_lookup,email_cipher,role,status,grade,class_number,seat_number,created_at,updated_at) VALUES(?,?,?,?, 'active',?,?,?,?,?)").bind(userId, await emailLookup(email), await seal(email), invitation.role, assignedGrade, assignedClassNumber, profile?.seatNumber ?? null, timestamp, timestamp));
+      else statements.push(cf().DB.prepare("UPDATE users SET role=?,status='active',grade=?,class_number=?,seat_number=?,updated_at=? WHERE id=?").bind(invitation.role, assignedGrade ?? user.grade, assignedClassNumber ?? user.class_number, profile?.seatNumber ?? user.seat_number, timestamp, userId));
       statements.push(cf().DB.prepare('INSERT INTO credentials(user_id,password_salt,password_digest,failed_attempts,created_at,updated_at) VALUES(?,?,?,0,?,?) ON CONFLICT(user_id) DO UPDATE SET password_salt=excluded.password_salt,password_digest=excluded.password_digest,failed_attempts=0,locked_until=NULL,updated_at=excluded.updated_at').bind(userId, salt, digestValue, timestamp, timestamp));
-      if (profile) { const classId = invitation.class_id || profile.code; statements.push(cf().DB.prepare('INSERT INTO classes(id,code,grade,class_number,created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(classId, profile.code, profile.grade, profile.classNumber, timestamp),cf().DB.prepare('DELETE FROM class_students WHERE student_id=?').bind(userId),cf().DB.prepare('INSERT INTO class_students(class_id,student_id,joined_at) VALUES(?,?,?)').bind(classId, userId, timestamp)); }
+      if (profile || customStudent) { const classId = invitation.class_id || profile!.code; if (profile && !targetClass) statements.push(cf().DB.prepare('INSERT INTO classes(id,code,grade,class_number,created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(classId, profile.code, profile.grade, profile.classNumber, timestamp)); statements.push(cf().DB.prepare('DELETE FROM class_students WHERE student_id=?').bind(userId),cf().DB.prepare('INSERT INTO class_students(class_id,student_id,joined_at) VALUES(?,?,?)').bind(classId, userId, timestamp)); }
       const registered = await cf().DB.batch(statements); if (!registered[0].meta.changes) throw new ApiError('一次性啟用碼已被使用。', 409); user = await findUser(email);
       await acknowledge(user!.id, data.privacyVersion); const session = await createSession(request, user!); await audit(user!.id, 'auth.invitation_registered'); return json({ user: session.user, csrfToken: session.csrfToken }, 201, { 'set-cookie': sessionCookie(session.token) });
     }
@@ -380,6 +382,12 @@ async function handle(request: Request) {
       const data = await body(request); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
       return json(await createChallenge(request, data.email, 'application'), 201);
     }
+    if (method === 'POST' && path === '/api/applications/direct') {
+      const data = await body(request), email = normalizeEmail(data.email); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
+      await rateLimit(`direct-application-ip:${await ipDigest(request)}`, 5, 60 * 60); const lookup = await emailLookup(email); await rateLimit(`direct-application-email:${lookup}`, 3, 24 * 60 * 60);
+      const pending = await cf().DB.prepare("SELECT id FROM access_applications WHERE email_lookup=? AND status='pending'").bind(lookup).first<Row>(); if (pending) throw new ApiError('此信箱已有待審申請，請勿重複送出。', 409);
+      const result = await makeApplication({ email_lookup: lookup, email_cipher: await seal(email) }, data, false); await audit(null, 'application.direct_submitted', 'application', result.id, 'success', { emailVerified: false }); return json({ ...result, notice: '申請已送出。信箱尚未驗證，開發者核對身分後才會發給一次性啟用碼。' }, 201);
+    }
     if (method === 'POST' && path === '/api/applications/submit') {
       const data = await body(request); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
       return json(await makeApplication(await consumeChallenge(request, data.challengeId, data.otp, 'application'), data), 201);
@@ -406,6 +414,12 @@ async function handle(request: Request) {
       const classes = await Promise.all(result.results.map(async row => ({ ...row, teacher_email: row.teacher_email_cipher ? await unseal(row.teacher_email_cipher) : null, teacher_email_cipher: undefined })));
       return json({ classes });
     }
+    if (method === 'POST' && path === '/api/classes') {
+      const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const data = await body(request), code = textValue(data.code, 40).trim(), grade = Number(data.grade);
+      if (!/^[\p{L}\p{N} _-]{2,40}$/u.test(code)) throw new ApiError('班級名稱限 2 至 40 個中英文字、數字、空格、底線或連字號。'); if (![7,8,9].includes(grade)) throw new ApiError('請選擇七、八或九年級程度。');
+      const id = `custom-${uuid()}`; try { await cf().DB.prepare('INSERT INTO classes(id,code,grade,class_number,created_at) VALUES(?,?,?,0,?)').bind(id, code, grade, now()).run(); } catch { throw new ApiError('班級名稱已存在，請使用其他名稱。', 409); }
+      await audit(session.user_id, 'class.custom_created', 'class', id, 'success', { code, grade }); return json({ id, code, grade, custom: true }, 201);
+    }
     const classTeacher = path.match(/^\/api\/classes\/([^/]+)\/teacher$/);
     if (method === 'PATCH' && classTeacher) {
       const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const data = await body(request), teacher = await findUser(normalizeEmail(data.teacherEmail));
@@ -426,9 +440,10 @@ async function handle(request: Request) {
     if (method === 'POST' && path === '/api/invitations') {
       const session = await authenticate(request, ['developer', 'teacher']); await requireCsrf(request, session); const data = await body(request), role = data.role === 'teacher' ? 'teacher' : 'student', count = Math.min(40, Math.max(1, Number(data.count) || 1)), days = Math.min(30, Math.max(1, Number(data.expiresInDays) || 7));
       if (session.role === 'teacher' && role !== 'student') throw new ApiError('教師只能替自己任教班級產生學生啟用碼。', 403);
-      const classId = role === 'student' ? textValue(data.classId, 80) : null; if (classId && !(await cf().DB.prepare('SELECT id FROM classes WHERE id=?').bind(classId).first())) throw new ApiError('找不到指定班級。', 404);
+      const classId = role === 'student' ? textValue(data.classId, 80) : null, targetClass = classId ? await cf().DB.prepare('SELECT * FROM classes WHERE id=?').bind(classId).first<Row>() : null; if (classId && !targetClass) throw new ApiError('找不到指定班級。', 404);
       if (session.role === 'teacher' && (!classId || !(await cf().DB.prepare('SELECT id FROM classes WHERE id=? AND teacher_id=?').bind(classId, session.user_id).first()))) throw new ApiError('您只能替自己任教的班級產生啟用碼。', 403);
       const boundEmail = normalizeEmail(data.email), boundLookup = boundEmail ? await emailLookup(boundEmail) : null; if (role === 'teacher' && !boundEmail) throw new ApiError('教師啟用碼必須綁定教師信箱。');
+      if (role === 'student' && Number(targetClass?.class_number) === 0 && !boundEmail) throw new ApiError('自訂班級的學生啟用碼必須綁定申請者信箱。');
       const expiresAt = new Date(Date.now() + days * 86400_000).toISOString(), codes: string[] = [], invitationIds: string[] = [];
       for (let index = 0; index < count; index++) { const code = inviteCode(), id = uuid(); await cf().DB.prepare('INSERT INTO invitation_codes(id,code_digest,role,class_id,email_lookup,uses_remaining,expires_at,created_by,created_at) VALUES(?,?,?,?,?,1,?,?,?)').bind(id, await hmac(`invite:${code.replace(/\s/g, '')}`), role, classId, boundLookup, expiresAt, session.user_id, now()).run(); codes.push(code); invitationIds.push(id); }
       await audit(session.user_id, 'invitation.created', 'invitation_batch', '', 'success', { role, classId, count }); return json({ codes, invitationIds, role, classId, expiresAt, notice: '啟用碼只顯示這一次，請安全交付。' }, 201);
