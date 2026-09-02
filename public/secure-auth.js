@@ -3,6 +3,8 @@
   const PRIVACY_VERSION='2026-09-01';
   let challengeId='',purpose='login',educationMode='',currentUser=null,csrfToken='',developerProof='';
   const apiBase=()=>String(window.MATH_API_BASE||'').replace(/\/$/,'');
+  const updateLoginCopy=()=>{const note=document.querySelector('#authGate .source-note');if(note)note.textContent='龍門國中學生使用學校信箱驗證；請至信箱收取驗證碼。其他申請者須先完成信箱驗證並由開發者核准。'};
+  updateLoginCopy();
   const studentProfile=email=>{const match=String(email||'').toLowerCase().match(/^s(113|114|115)(0[1-9]|1\d|20)(0[1-9]|[12]\d|3\d|40)@lmjh\.tp\.edu\.tw$/);return match?{year:match[1],grade:{113:'9',114:'8',115:'7'}[match[1]],classNumber:Number(match[2]),seatNumber:Number(match[3])}:null};
   async function api(path,options={}){const base=apiBase();if(location.hostname.endsWith('github.io')&&!base)throw new Error('安全後端尚未設定；GitHub 預覽版不會收集身分資料。');const response=await fetch(base+path,{credentials:'include',...options,headers:{...(options.body?{'content-type':'application/json'}:{}),...(csrfToken?{'x-csrf-token':csrfToken}:{}),...(options.headers||{})}});let data={};try{data=await response.json()}catch{}if(!response.ok)throw new Error(data.error||'系統暫時無法處理，請稍後再試。');return data}
   function message(text,ok=false){const box=$('#authMessage');if(!box)return;box.textContent=text;box.className='feedback '+(ok?'ok':'no')}

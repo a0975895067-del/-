@@ -9,6 +9,7 @@ declare namespace Cloudflare {
     EMAIL_API_URL?: string;
     EMAIL_API_KEY?: string;
     EMAIL_FROM?: string;
+    EMAIL_PROVIDER?: string;
     EDU_OIDC_ISSUER?: string;
     EDU_OIDC_CLIENT_ID?: string;
     EDU_OIDC_CLIENT_SECRET?: string;

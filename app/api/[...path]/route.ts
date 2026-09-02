@@ -106,12 +106,20 @@ async function audit(actor: string | null, action: string, targetType = '', targ
 }
 async function sendOtp(email: string, otp: string) {
   const e = cf();
-  if (!e.EMAIL_API_URL || !e.EMAIL_API_KEY || !e.EMAIL_FROM) throw new ApiError('驗證信服務尚未啟用；驗證碼不會顯示在網頁上。', 503);
+  if (!e.EMAIL_API_URL || !e.EMAIL_API_KEY || !e.EMAIL_FROM) throw new ApiError('驗證信服務尚未啟用；啟用後請至信箱收取驗證碼。', 503);
+  const provider = String(e.EMAIL_PROVIDER || (e.EMAIL_API_URL.includes('brevo.com') ? 'brevo' : 'resend')).toLowerCase();
+  const message = `您的驗證碼是 ${otp}，10 分鐘內有效。若非本人操作，請忽略此信。`;
+  const brevo = provider === 'brevo';
   const response = await fetch(e.EMAIL_API_URL, {
-    method: 'POST', headers: { authorization: `Bearer ${e.EMAIL_API_KEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ from: e.EMAIL_FROM, to: [email], subject: '數學任務站登入驗證碼', text: `您的驗證碼是 ${otp}，10 分鐘內有效。若非本人操作，請忽略此信。` }),
+    method: 'POST',
+    headers: brevo
+      ? { 'api-key': e.EMAIL_API_KEY, 'content-type': 'application/json' }
+      : { authorization: `Bearer ${e.EMAIL_API_KEY}`, 'content-type': 'application/json', 'idempotency-key': `math-otp-${await digest(`${email}:${otp}`)}` },
+    body: JSON.stringify(brevo
+      ? { sender: { name: '數學任務站', email: e.EMAIL_FROM }, to: [{ email }], subject: '數學任務站登入驗證碼', textContent: message }
+      : { from: `數學任務站 <${e.EMAIL_FROM}>`, to: [email], subject: '數學任務站登入驗證碼', text: message }),
   });
-  if (!response.ok) throw new ApiError('驗證信目前無法寄出，請稍後再試。', 503);
+  if (!response.ok) throw new ApiError('驗證信目前無法寄出，請確認寄件人已驗證或稍後再試。', 503);
 }
 async function createChallenge(request: Request, emailValue: unknown, purpose: string) {
   const email = normalizeEmail(emailValue);
