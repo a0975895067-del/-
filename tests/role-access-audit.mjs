@@ -8,6 +8,16 @@ for (let round = 1; round <= 3; round++) {
   assert.equal((await request('/api/reports/test-report-b', 'test-student-a')).response.status, 404);
   const teacher = await request('/api/reports', 'test-teacher-a'); assert.equal(teacher.response.status, 200); assert.deepEqual(teacher.data.reports.map(row => row.id), ['test-report-a']);
   assert.equal((await request('/api/classes/test-702/students', 'test-teacher-a')).response.status, 403);
+  const mutationHeaders = role => ({ origin: base, 'content-type': 'application/json', 'x-csrf-token': `csrf-${role}` });
+  assert.equal((await request('/api/students/test-student-a/class', 'test-teacher-a', { method: 'PATCH', headers: mutationHeaders('test-teacher-a'), body: JSON.stringify({ classId: 'test-702' }) })).response.status, 403);
+  assert.equal((await request('/api/students/test-student-a/class', 'test-student-a', { method: 'PATCH', headers: mutationHeaders('test-student-a'), body: JSON.stringify({ classId: 'test-702' }) })).response.status, 403);
+  assert.equal((await request('/api/students/test-student-a/class', 'test-developer', { method: 'PATCH', headers: mutationHeaders('test-developer'), body: JSON.stringify({ classId: 'test-702' }) })).response.status, 200);
+  assert.ok((await request('/api/classes/test-702/students', 'test-developer')).data.students.some(row => row.id === 'test-student-a'));
+  assert.equal((await request('/api/students/test-student-a/class', 'test-developer', { method: 'PATCH', headers: mutationHeaders('test-developer'), body: JSON.stringify({ classId: 'test-701' }) })).response.status, 200);
+  assert.equal((await request('/api/classes/test-702/teacher', 'test-teacher-a', { method: 'PATCH', headers: mutationHeaders('test-teacher-a'), body: JSON.stringify({ teacherEmail: 'teacher-a@example.test' }) })).response.status, 403);
+  assert.equal((await request('/api/classes/test-702/teacher', 'test-developer', { method: 'PATCH', headers: mutationHeaders('test-developer'), body: JSON.stringify({ teacherEmail: 'teacher-a@example.test' }) })).response.status, 200);
+  assert.ok((await request('/api/classes', 'test-developer')).data.classes.some(row => row.id === 'test-702' && row.teacher_email === 'teacher-a@example.test'));
+  assert.equal((await request('/api/classes/test-702/teacher', 'test-developer', { method: 'PATCH', headers: mutationHeaders('test-developer'), body: JSON.stringify({ teacherEmail: 'teacher-b@example.test' }) })).response.status, 200);
   assert.equal((await request('/api/invitations', 'test-teacher-a', { method: 'POST', headers: { origin: base, 'content-type': 'application/json', 'x-csrf-token': 'csrf-test-teacher-a' }, body: JSON.stringify({ role: 'student', classId: 'test-702', count: 1 }) })).response.status, 403);
   assert.equal((await request('/api/invitations', 'test-teacher-a', { method: 'POST', headers: { origin: base, 'content-type': 'application/json', 'x-csrf-token': 'csrf-test-teacher-a' }, body: JSON.stringify({ role: 'teacher', email: 'another-teacher@example.test', count: 1 }) })).response.status, 403);
   assert.equal((await request('/api/invitations', 'test-teacher-a', { method: 'POST', headers: { origin: base, 'content-type': 'application/json', 'x-csrf-token': 'csrf-test-teacher-a' }, body: JSON.stringify({ role: 'student', classId: 'test-701', count: 1 }) })).response.status, 201);
@@ -19,4 +29,4 @@ for (let round = 1; round <= 3; round++) {
   const applicant = await request('/api/applications/request-code', null, { method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ email: `applicant-${round}@example.test`, privacyVersion: '2026-09-01' }) }); assert.equal(applicant.response.status, 503); assert.equal('developmentOtp' in applicant.data, false);
   console.log(`第 ${round} 輪：學生、教師、非學生／非教師、一般使用者、開發者皆通過。`);
 }
-console.log('三輪共 48 項權限與驗證安全檢查全數通過。');
+console.log('三輪共 75 項權限與驗證安全檢查全數通過。');
