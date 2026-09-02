@@ -15,7 +15,9 @@
     $('#authGate')?.classList.add('hidden');
     $('#studentBar')?.classList.remove('hidden');
     $('#logoutButton')?.classList.add('hidden');
-    if ($('#studentAccount')) $('#studentAccount').textContent = 'GitHub 公益預覽（不登入、不上傳資料）';
+    if ($('#studentAccount')) {
+      $('#studentAccount').textContent = 'GitHub 公益預覽（不登入、不上傳資料）';
+    }
     document.querySelectorAll('.learning-area').forEach(section => section.classList.remove('hidden'));
 
     if (!$('#githubPreviewNotice')) {
@@ -24,14 +26,14 @@
       notice.className = 'card learning-area preview-notice';
       const heading = document.createElement('h2');
       heading.textContent = 'GitHub 公益學習版';
-      const text = document.createElement('p');
-      text.textContent = '目前不啟用登入與雲端班級功能；七、八、九年級題庫、難易度與題數選擇、提示、原因解析、AI 本機引導、學習分析及列印／另存 PDF 報告均可直接使用。作答資料只留在這台裝置，不會傳送到網路。';
+      const copy = document.createElement('p');
+      copy.textContent = '七、八、九年級練習、提示、解析、學習分析與 PDF 報告可直接使用。此公開頁不啟用帳號、驗證碼、班級或教師後台，也不會把作答資料傳到網路。';
       const privacy = document.createElement('p');
-      const privacyLink = document.createElement('a');
-      privacyLink.href = 'privacy.html';
-      privacyLink.textContent = '查看隱私與資料使用說明';
-      privacy.append(privacyLink);
-      notice.append(heading, text, privacy);
+      const link = document.createElement('a');
+      link.href = 'privacy.html';
+      link.textContent = '查看隱私與資料使用說明';
+      privacy.append(link);
+      notice.append(heading, copy, privacy);
       document.querySelector('.welcome')?.insertAdjacentElement('beforebegin', notice);
     }
 
@@ -44,3 +46,4 @@
     ? document.addEventListener('DOMContentLoaded', startStaticMode)
     : startStaticMode();
 })();
+
