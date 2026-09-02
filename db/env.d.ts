@@ -6,6 +6,7 @@ declare namespace Cloudflare {
     DATA_ENCRYPTION_KEY?: string;
     DEVELOPER_EMAIL?: string;
     DEVELOPER_PASSWORD?: string;
+    DEVELOPER_SETUP_TOKEN?: string;
     EMAIL_API_URL?: string;
     EMAIL_API_KEY?: string;
     EMAIL_FROM?: string;

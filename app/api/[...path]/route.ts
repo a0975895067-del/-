@@ -54,6 +54,39 @@ async function safeEqual(left: string, right: string) {
   let mismatch = 0; for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return mismatch === 0;
 }
+async function passwordDigest(password: string, salt: string) {
+  if (password.length < 12 || password.length > 200) throw new ApiError('密碼至少需要 12 個字元。');
+  const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations: 310_000 }, key, 256);
+  return b64url(new Uint8Array(bits));
+}
+const base32Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function base32Encode(bytes: Uint8Array) {
+  let bits = 0, value = 0, output = '';
+  for (const byte of bytes) { value = (value << 8) | byte; bits += 8; while (bits >= 5) { output += base32Alphabet[(value >>> (bits - 5)) & 31]; bits -= 5; } }
+  if (bits) output += base32Alphabet[(value << (5 - bits)) & 31];
+  return output;
+}
+function base32Decode(value: string) {
+  let bits = 0, buffer = 0; const output: number[] = [];
+  for (const char of value.toUpperCase().replace(/[^A-Z2-7]/g, '')) { const index = base32Alphabet.indexOf(char); if (index < 0) continue; buffer = (buffer << 5) | index; bits += 5; if (bits >= 8) { output.push((buffer >>> (bits - 8)) & 255); bits -= 8; } }
+  return new Uint8Array(output);
+}
+async function totpCode(secret: string, counter: number) {
+  const key = await crypto.subtle.importKey('raw', base32Decode(secret), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const message = new Uint8Array(8); let value = BigInt(counter); for (let i = 7; i >= 0; i--) { message[i] = Number(value & 255n); value >>= 8n; }
+  const signed = new Uint8Array(await crypto.subtle.sign('HMAC', key, message)); const offset = signed[signed.length - 1] & 15;
+  const binary = ((signed[offset] & 127) << 24) | (signed[offset + 1] << 16) | (signed[offset + 2] << 8) | signed[offset + 3];
+  return String(binary % 1_000_000).padStart(6, '0');
+}
+async function verifyTotp(secret: string, otp: unknown, lastCounter: number | null = null) {
+  const candidate = String(otp || ''); if (!/^\d{6}$/.test(candidate)) return null; const current = Math.floor(Date.now() / 30_000);
+  for (const counter of [current - 1, current, current + 1]) if ((lastCounter == null || counter > lastCounter) && await safeEqual(await totpCode(secret, counter), candidate)) return counter;
+  return null;
+}
+function inviteCode() {
+  const bytes = new Uint8Array(9); crypto.getRandomValues(bytes); return base32Encode(bytes).match(/.{1,4}/g)!.join('-');
+}
 
 function json(data: unknown, status = 200, extra: HeadersInit = {}) {
   const headers = new Headers(extra);
@@ -255,6 +288,59 @@ async function handle(request: Request) {
       return json({ ok: true, database: Boolean(cf().DB), email: Boolean(cf().EMAIL_API_URL && cf().EMAIL_API_KEY && cf().EMAIL_FROM), educationOidc: oidcEnabled(), privacyVersion: PRIVACY_VERSION });
     }
     if (method === 'GET' && path === '/api/auth/education/status') return json({ enabled: oidcEnabled(), provider: '教育雲端帳號' });
+    if (method === 'GET' && path === '/api/auth/local/status') {
+      const developerEmail = normalizeEmail(cf().DEVELOPER_EMAIL); let configured = false;
+      if (developerEmail) { const user = await findUser(developerEmail); if (user) configured = Boolean(await cf().DB.prepare('SELECT user_id FROM credentials c JOIN totp_enrollments t USING(user_id) WHERE c.user_id=? AND t.enabled=1').bind(user.id).first()); }
+      return json({ enabled: true, developerConfigured: configured, methods: ['password', 'invitation', 'totp'] });
+    }
+    if (method === 'POST' && path === '/api/auth/developer/setup/start') {
+      const data = await body(request), email = normalizeEmail(data.email), setupToken = String(data.setupToken || '');
+      if (email !== normalizeEmail(cf().DEVELOPER_EMAIL) || !cf().DEVELOPER_SETUP_TOKEN || !(await safeEqual(setupToken, cf().DEVELOPER_SETUP_TOKEN!))) throw new ApiError('開發者初始設定碼不正確。', 401);
+      await rateLimit(`developer-setup:${await ipDigest(request)}`, 5, 15 * 60);
+      let user = await findUser(email); const timestamp = now();
+      if (user && await cf().DB.prepare('SELECT user_id FROM totp_enrollments WHERE user_id=? AND enabled=1').bind(user.id).first()) throw new ApiError('開發者動態驗證器已完成設定。', 409);
+      if (!user) { const id = uuid(); await cf().DB.prepare("INSERT INTO users(id,email_lookup,email_cipher,role,status,created_at,updated_at) VALUES(?,?,?,'developer','active',?,?)").bind(id, await emailLookup(email), await seal(email), timestamp, timestamp).run(); user = await findUser(email); }
+      else await cf().DB.prepare("UPDATE users SET role='developer',status='active',updated_at=? WHERE id=?").bind(timestamp, user.id).run();
+      const salt = randomToken(24), secretBytes = new Uint8Array(20); crypto.getRandomValues(secretBytes); const secret = base32Encode(secretBytes);
+      await cf().DB.prepare('INSERT INTO credentials(user_id,password_salt,password_digest,failed_attempts,created_at,updated_at) VALUES(?,?,?,0,?,?) ON CONFLICT(user_id) DO UPDATE SET password_salt=excluded.password_salt,password_digest=excluded.password_digest,failed_attempts=0,locked_until=NULL,updated_at=excluded.updated_at').bind(user!.id, salt, await passwordDigest(String(data.password || ''), salt), timestamp, timestamp).run();
+      await cf().DB.prepare('INSERT INTO totp_enrollments(user_id,secret_cipher,enabled,created_at,updated_at) VALUES(?,?,0,?,?) ON CONFLICT(user_id) DO UPDATE SET secret_cipher=excluded.secret_cipher,enabled=0,last_counter=NULL,updated_at=excluded.updated_at').bind(user!.id, await seal(secret), timestamp, timestamp).run();
+      const uri = `otpauth://totp/${encodeURIComponent(`數學任務站:${email}`)}?secret=${secret}&issuer=${encodeURIComponent('數學任務站')}&digits=6&period=30`;
+      return json({ manualKey: secret, otpauthUri: uri });
+    }
+    if (method === 'POST' && path === '/api/auth/developer/setup/confirm') {
+      const data = await body(request), email = normalizeEmail(data.email), setupToken = String(data.setupToken || '');
+      if (email !== normalizeEmail(cf().DEVELOPER_EMAIL) || !cf().DEVELOPER_SETUP_TOKEN || !(await safeEqual(setupToken, cf().DEVELOPER_SETUP_TOKEN!))) throw new ApiError('開發者初始設定碼不正確。', 401);
+      const user = await findUser(email); if (!user) throw new ApiError('請先開始開發者設定。', 409);
+      const enrollment = await cf().DB.prepare('SELECT * FROM totp_enrollments WHERE user_id=?').bind(user.id).first<Row>(); if (!enrollment) throw new ApiError('請先開始開發者設定。', 409);
+      const counter = await verifyTotp(await unseal(enrollment.secret_cipher), data.otp, enrollment.last_counter); if (counter == null) throw new ApiError('動態驗證碼不正確。', 401);
+      await cf().DB.prepare('UPDATE totp_enrollments SET enabled=1,last_counter=?,updated_at=? WHERE user_id=?').bind(counter, now(), user.id).run(); await acknowledge(user.id, data.privacyVersion);
+      const session = await createSession(request, user); await audit(user.id, 'auth.developer_totp_enrolled'); return json({ user: session.user, csrfToken: session.csrfToken }, 200, { 'set-cookie': sessionCookie(session.token) });
+    }
+    if (method === 'POST' && path === '/api/auth/password-login') {
+      const data = await body(request), email = normalizeEmail(data.email), user = await findUser(email); await rateLimit(`password-login:${await ipDigest(request)}`, 20, 15 * 60);
+      if (!user || user.status !== 'active') throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
+      const credential = await cf().DB.prepare('SELECT * FROM credentials WHERE user_id=?').bind(user.id).first<Row>();
+      if (!credential || (credential.locked_until && Date.parse(credential.locked_until) > Date.now())) throw new ApiError('帳號暫時無法登入，請稍後再試。', 423);
+      const matches = await safeEqual(credential.password_digest, await passwordDigest(String(data.password || ''), credential.password_salt));
+      if (!matches) { const failures = Number(credential.failed_attempts) + 1, locked = failures >= 5 ? new Date(Date.now() + 15 * 60_000).toISOString() : null; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=?,updated_at=? WHERE user_id=?').bind(failures, locked, now(), user.id).run(); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); }
+      if (user.role === 'developer') { const enrollment = await cf().DB.prepare('SELECT * FROM totp_enrollments WHERE user_id=? AND enabled=1').bind(user.id).first<Row>(); if (!enrollment) throw new ApiError('開發者尚未完成動態驗證器設定。', 409); const counter = await verifyTotp(await unseal(enrollment.secret_cipher), data.otp, enrollment.last_counter); if (counter == null) throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); await cf().DB.prepare('UPDATE totp_enrollments SET last_counter=?,updated_at=? WHERE user_id=?').bind(counter, now(), user.id).run(); }
+      await cf().DB.prepare('UPDATE credentials SET failed_attempts=0,locked_until=NULL,updated_at=? WHERE user_id=?').bind(now(), user.id).run(); await acknowledge(user.id, data.privacyVersion); const session = await createSession(request, user); await audit(user.id, 'auth.password_login');
+      return json({ user: session.user, csrfToken: session.csrfToken }, 200, { 'set-cookie': sessionCookie(session.token) });
+    }
+    if (method === 'POST' && path === '/api/auth/invitation/register') {
+      const data = await body(request), email = normalizeEmail(data.email), code = String(data.invitationCode || '').toUpperCase().replace(/\s/g, ''); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
+      await rateLimit(`invitation:${await ipDigest(request)}`, 20, 15 * 60); const invitation = await cf().DB.prepare('SELECT * FROM invitation_codes WHERE code_digest=?').bind(await hmac(`invite:${code}`)).first<Row>();
+      if (!invitation || Number(invitation.uses_remaining) < 1 || Date.parse(invitation.expires_at) <= Date.now() || (invitation.email_lookup && invitation.email_lookup !== await emailLookup(email))) throw new ApiError('一次性啟用碼錯誤或已失效。', 401);
+      const profile = invitation.role === 'student' ? studentProfile(email) : null; if (invitation.role === 'student' && !profile) throw new ApiError('學生必須使用符合規則的龍門國中信箱。', 403);
+      if (profile && invitation.class_id && invitation.class_id !== profile.code && invitation.class_id !== `test-${profile.code}`) throw new ApiError('此啟用碼不屬於您的班級。', 403);
+      const consumed = await cf().DB.prepare('UPDATE invitation_codes SET uses_remaining=uses_remaining-1 WHERE id=? AND uses_remaining>0').bind(invitation.id).run(); if (!consumed.meta.changes) throw new ApiError('一次性啟用碼已被使用。', 409);
+      let user = await findUser(email); const timestamp = now();
+      if (!user) { const id = uuid(); await cf().DB.prepare("INSERT INTO users(id,email_lookup,email_cipher,role,status,grade,class_number,seat_number,created_at,updated_at) VALUES(?,?,?,?, 'active',?,?,?,?,?)").bind(id, await emailLookup(email), await seal(email), invitation.role, profile?.grade ?? null, profile?.classNumber ?? null, profile?.seatNumber ?? null, timestamp, timestamp).run(); user = await findUser(email); }
+      else await cf().DB.prepare("UPDATE users SET role=?,status='active',grade=?,class_number=?,seat_number=?,updated_at=? WHERE id=?").bind(invitation.role, profile?.grade ?? user.grade, profile?.classNumber ?? user.class_number, profile?.seatNumber ?? user.seat_number, timestamp, user.id).run();
+      const salt = randomToken(24); await cf().DB.prepare('INSERT INTO credentials(user_id,password_salt,password_digest,failed_attempts,created_at,updated_at) VALUES(?,?,?,0,?,?) ON CONFLICT(user_id) DO UPDATE SET password_salt=excluded.password_salt,password_digest=excluded.password_digest,failed_attempts=0,locked_until=NULL,updated_at=excluded.updated_at').bind(user!.id, salt, await passwordDigest(String(data.password || ''), salt), timestamp, timestamp).run();
+      if (profile) { const classId = invitation.class_id || profile.code; await cf().DB.prepare('INSERT INTO classes(id,code,grade,class_number,created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(classId, profile.code, profile.grade, profile.classNumber, timestamp).run(); await cf().DB.prepare('INSERT INTO class_students(class_id,student_id,joined_at) VALUES(?,?,?) ON CONFLICT DO NOTHING').bind(classId, user!.id, timestamp).run(); }
+      await acknowledge(user!.id, data.privacyVersion); const session = await createSession(request, user!); await audit(user!.id, 'auth.invitation_registered'); return json({ user: session.user, csrfToken: session.csrfToken }, 201, { 'set-cookie': sessionCookie(session.token) });
+    }
     if (method === 'GET' && path === '/api/auth/education/start') return beginOidc(request, url);
     if (method === 'GET' && path === '/api/auth/education/callback') return finishOidc(request, url);
 
@@ -330,6 +416,18 @@ async function handle(request: Request) {
     if (method === 'GET' && path === '/api/teachers') {
       await authenticate(request, ['developer']); const result = await cf().DB.prepare("SELECT id,email_cipher FROM users WHERE role='teacher' AND status='active' ORDER BY created_at").all<Row>();
       return json({ teachers: await Promise.all(result.results.map(async row => ({ id: row.id, email: await unseal(row.email_cipher) }))) });
+    }
+    if (method === 'GET' && path === '/api/invitations') {
+      await authenticate(request, ['developer']); const rows = await cf().DB.prepare('SELECT id,role,class_id,email_lookup,uses_remaining,expires_at,created_at FROM invitation_codes ORDER BY created_at DESC LIMIT 500').all<Row>();
+      return json({ invitations: rows.results.map(row => ({ ...row, emailBound: Boolean(row.email_lookup), email_lookup: undefined })) });
+    }
+    if (method === 'POST' && path === '/api/invitations') {
+      const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const data = await body(request), role = data.role === 'teacher' ? 'teacher' : 'student', count = Math.min(40, Math.max(1, Number(data.count) || 1)), days = Math.min(30, Math.max(1, Number(data.expiresInDays) || 7));
+      const classId = role === 'student' ? textValue(data.classId, 80) : null; if (classId && !(await cf().DB.prepare('SELECT id FROM classes WHERE id=?').bind(classId).first())) throw new ApiError('找不到指定班級。', 404);
+      const boundEmail = normalizeEmail(data.email), boundLookup = boundEmail ? await emailLookup(boundEmail) : null; if (role === 'teacher' && !boundEmail) throw new ApiError('教師啟用碼必須綁定教師信箱。');
+      const expiresAt = new Date(Date.now() + days * 86400_000).toISOString(), codes: string[] = [];
+      for (let index = 0; index < count; index++) { const code = inviteCode(); await cf().DB.prepare('INSERT INTO invitation_codes(id,code_digest,role,class_id,email_lookup,uses_remaining,expires_at,created_by,created_at) VALUES(?,?,?,?,?,1,?,?,?)').bind(uuid(), await hmac(`invite:${code.replace(/\s/g, '')}`), role, classId, boundLookup, expiresAt, session.user_id, now()).run(); codes.push(code); }
+      await audit(session.user_id, 'invitation.created', 'invitation_batch', '', 'success', { role, classId, count }); return json({ codes, role, classId, expiresAt, notice: '啟用碼只顯示這一次，請安全交付。' }, 201);
     }
     const classStudents = path.match(/^\/api\/classes\/([^/]+)\/students$/);
     if (method === 'GET' && classStudents) {
