@@ -42,7 +42,7 @@ export const config = Object.freeze({
   sessionSecret,
   otpSecret,
   dataEncryptionKey,
-  developerEmail: (env.DEVELOPER_EMAIL || 'a0975895067@gmail.com').toLowerCase(),
+  developerEmail: required('DEVELOPER_EMAIL').toLowerCase(),
   emailApiUrl: required('EMAIL_API_URL'),
   emailApiKey: required('EMAIL_API_KEY'),
   emailFrom: required('EMAIL_FROM'),

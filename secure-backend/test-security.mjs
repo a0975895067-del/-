@@ -17,7 +17,7 @@ const origin=`http://127.0.0.1:${server.address().port}`;
 const request=async(path,options={})=>{const response=await fetch(origin+path,{...options,headers:{'content-type':'application/json',origin,...(options.headers||{})}});let data={};try{data=await response.json()}catch{}return{response,data};};
 try {
   const challengeId='developer-test-challenge',otp='123456';
-  addChallenge(challengeId,process.env.DEVELOPER_EMAIL||'a0975895067@gmail.com',otp,'login');
+  addChallenge(challengeId,process.env.DEVELOPER_EMAIL||'developer-ci@example.invalid',otp,'login');
   let r=await request('/api/auth/verify-code',{method:'POST',body:JSON.stringify({challengeId,otp,privacyVersion:'2026-09-01'})});
   assert.equal(r.response.status,200);assert.equal(r.data.requiresDeveloperPassword,true);assert.ok(r.data.developerProof);assert.equal('csrfToken' in r.data,false);
   r=await request('/api/auth/developer-password',{method:'POST',body:JSON.stringify({developerProof:r.data.developerProof,password:process.env.DEVELOPER_PASSWORD,privacyVersion:'2026-09-01'})});
