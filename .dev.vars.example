@@ -3,9 +3,13 @@ DATA_ENCRYPTION_KEY=replace-with-a-separate-32-byte-random-secret
 DEVELOPER_EMAIL=developer@example.edu.tw
 DEVELOPER_SETUP_TOKEN=replace-with-a-long-one-time-random-token
 
-# Optional legacy email/OIDC integrations. Leave unset to disable safely.
+# Optional email/OIDC integrations. Leave unset to disable safely.
+EMAIL_PROVIDER=resend
+EMAIL_API_URL=https://api.resend.com/emails
 EMAIL_API_KEY=
 EMAIL_FROM=
-EDUCATION_OIDC_ISSUER=
-EDUCATION_OIDC_CLIENT_ID=
-EDUCATION_OIDC_CLIENT_SECRET=
+EDU_OIDC_ISSUER=
+EDU_OIDC_CLIENT_ID=
+EDU_OIDC_CLIENT_SECRET=
+EDU_OIDC_REDIRECT_URI=
+EDU_OIDC_ROLE_CLAIM=role
