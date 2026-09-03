@@ -57,7 +57,8 @@ async function safeEqual(left: string, right: string) {
 async function passwordDigest(password: string, salt: string) {
   if (password.length < 12 || password.length > 200) throw new ApiError('密碼至少需要 12 個字元。');
   const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations: 310_000 }, key, 256);
+  // Cloudflare Workers currently caps PBKDF2 at 100,000 iterations.
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations: 100_000 }, key, 256);
   return b64url(new Uint8Array(bits));
 }
 const base32Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
