@@ -18,7 +18,7 @@ jobs:
       - name: Run isolated role and security audit
         env:
           NODE_ENV: development
-          DEVELOPER_EMAIL: a0975895067@gmail.com
+          DEVELOPER_EMAIL: developer-ci@example.invalid
           DEVELOPER_PASSWORD: Audit-Only-Strong-Password-2026!
           SESSION_SECRET: ci-session-secret-${{ matrix.run }}-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789
           OTP_SECRET: ci-otp-secret-${{ matrix.run }}-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789
