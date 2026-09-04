@@ -390,7 +390,7 @@ async function handle(request: Request) {
       await rateLimit(`direct-application-ip:${await ipDigest(request)}`, 5, 60 * 60); const lookup = await emailLookup(email); await rateLimit(`direct-application-email:${lookup}`, 3, 24 * 60 * 60);
       const pending = await cf().DB.prepare("SELECT id FROM access_applications WHERE email_lookup=? AND status='pending'").bind(lookup).first<Row>(); if (pending) throw new ApiError('此信箱已有待審申請，請勿重複送出。', 409);
       const salt = randomToken(24), password = String(data.password || ''), passwordHash = await passwordDigest(password, salt);
-      const result = await makeApplication({ email_lookup: lookup, email_cipher: await seal(email) }, data, false, { salt, digest: passwordHash }); await audit(null, 'application.direct_submitted', 'application', result.id, 'success', { emailVerified: false }); return json({ ...result, notice: '申請已送出，目前為身分待人工核對。開發者核准後，即可使用申請信箱與剛才設定的密碼登入。' }, 201);
+      const result = await makeApplication({ email_lookup: lookup, email_cipher: await seal(email) }, data, false, { salt, digest: passwordHash }); await audit(null, 'application.direct_submitted', 'application', result.id, 'success', { emailVerified: false }); return json({ ...result, notice: '申請已送出，目前為待開發者核可。開發者核准後，即可使用申請信箱與剛才設定的密碼登入。' }, 201);
     }
     if (method === 'POST' && path === '/api/applications/submit') {
       const data = await body(request); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
