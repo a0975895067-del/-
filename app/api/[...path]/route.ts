@@ -387,7 +387,7 @@ async function handle(request: Request) {
       const data = await body(request), email = normalizeEmail(data.email); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
       await rateLimit(`direct-application-ip:${await ipDigest(request)}`, 5, 60 * 60); const lookup = await emailLookup(email); await rateLimit(`direct-application-email:${lookup}`, 3, 24 * 60 * 60);
       const pending = await cf().DB.prepare("SELECT id FROM access_applications WHERE email_lookup=? AND status='pending'").bind(lookup).first<Row>(); if (pending) throw new ApiError('此信箱已有待審申請，請勿重複送出。', 409);
-      const result = await makeApplication({ email_lookup: lookup, email_cipher: await seal(email) }, data, false); await audit(null, 'application.direct_submitted', 'application', result.id, 'success', { emailVerified: false }); return json({ ...result, notice: '申請已送出。信箱尚未驗證，開發者核對身分後才會發給一次性啟用碼。' }, 201);
+      const result = await makeApplication({ email_lookup: lookup, email_cipher: await seal(email) }, data, false); await audit(null, 'application.direct_submitted', 'application', result.id, 'success', { emailVerified: false }); return json({ ...result, notice: '申請已送出，目前為身分待人工核對。管理員核准後，會再安全提供第一次帳號啟用所需的一次性啟用碼。' }, 201);
     }
     if (method === 'POST' && path === '/api/applications/submit') {
       const data = await body(request); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
