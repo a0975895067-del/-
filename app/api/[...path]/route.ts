@@ -220,11 +220,11 @@ async function requireCsrf(request: Request, session: Row) {
   if (!token || !(await safeEqual(session.csrf_digest, await digest(token)))) throw new ApiError('安全驗證已失效，請重新整理頁面。', 403);
 }
 
-async function makeApplication(row: Row, data: Row, emailVerified = true) {
+async function makeApplication(row: Row, data: Row, emailVerified = true, pendingCredential: Row | null = null) {
   const identity = textValue(data.identity, 80), workplace = textValue(data.workplace, 120), jobTitle = textValue(data.jobTitle, 120);
   const id = uuid();
-  await cf().DB.prepare("INSERT INTO access_applications(id,email_lookup,email_cipher,identity_cipher,workplace_cipher,job_title_cipher,email_verified,status,requested_at) VALUES(?,?,?,?,?,?,?,'pending',?)")
-    .bind(id, row.email_lookup, row.email_cipher, await seal(identity), await seal(workplace), await seal(jobTitle), emailVerified ? 1 : 0, now()).run();
+  await cf().DB.prepare("INSERT INTO access_applications(id,email_lookup,email_cipher,identity_cipher,workplace_cipher,job_title_cipher,email_verified,pending_password_salt,pending_password_digest,status,requested_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?)")
+    .bind(id, row.email_lookup, row.email_cipher, await seal(identity), await seal(workplace), await seal(jobTitle), emailVerified ? 1 : 0, pendingCredential?.salt || null, pendingCredential?.digest || null, now()).run();
   return { id, status: 'pending' };
 }
 
@@ -385,9 +385,12 @@ async function handle(request: Request) {
     }
     if (method === 'POST' && path === '/api/applications/direct') {
       const data = await body(request), email = normalizeEmail(data.email); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
+      if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 254) throw new ApiError('請輸入有效的電子郵件。');
+      if (email === normalizeEmail(cf().DEVELOPER_EMAIL)) throw new ApiError('開發者帳號不使用一般申請流程。', 403);
       await rateLimit(`direct-application-ip:${await ipDigest(request)}`, 5, 60 * 60); const lookup = await emailLookup(email); await rateLimit(`direct-application-email:${lookup}`, 3, 24 * 60 * 60);
       const pending = await cf().DB.prepare("SELECT id FROM access_applications WHERE email_lookup=? AND status='pending'").bind(lookup).first<Row>(); if (pending) throw new ApiError('此信箱已有待審申請，請勿重複送出。', 409);
-      const result = await makeApplication({ email_lookup: lookup, email_cipher: await seal(email) }, data, false); await audit(null, 'application.direct_submitted', 'application', result.id, 'success', { emailVerified: false }); return json({ ...result, notice: '申請已送出，目前為身分待人工核對。管理員核准後，會再安全提供第一次帳號啟用所需的一次性啟用碼。' }, 201);
+      const salt = randomToken(24), password = String(data.password || ''), passwordHash = await passwordDigest(password, salt);
+      const result = await makeApplication({ email_lookup: lookup, email_cipher: await seal(email) }, data, false, { salt, digest: passwordHash }); await audit(null, 'application.direct_submitted', 'application', result.id, 'success', { emailVerified: false }); return json({ ...result, notice: '申請已送出，目前為身分待人工核對。開發者核准後，即可使用申請信箱與剛才設定的密碼登入。' }, 201);
     }
     if (method === 'POST' && path === '/api/applications/submit') {
       const data = await body(request); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
@@ -475,14 +478,14 @@ async function handle(request: Request) {
 
     if (method === 'GET' && path === '/api/applications') {
       await authenticate(request, ['developer']); const rows = await cf().DB.prepare('SELECT * FROM access_applications ORDER BY requested_at DESC LIMIT 500').all<Row>();
-      return json({ applications: await Promise.all(rows.results.map(async row => ({ ...row, email: await unseal(row.email_cipher), identity: await unseal(row.identity_cipher), workplace: await unseal(row.workplace_cipher), job_title: await unseal(row.job_title_cipher), email_cipher: undefined, identity_cipher: undefined, workplace_cipher: undefined, job_title_cipher: undefined }))) });
+      return json({ applications: await Promise.all(rows.results.map(async row => ({ ...row, email: await unseal(row.email_cipher), identity: await unseal(row.identity_cipher), workplace: await unseal(row.workplace_cipher), job_title: await unseal(row.job_title_cipher), hasPendingPassword: Boolean(row.pending_password_digest), email_cipher: undefined, identity_cipher: undefined, workplace_cipher: undefined, job_title_cipher: undefined, pending_password_salt: undefined, pending_password_digest: undefined }))) });
     }
     const review = path.match(/^\/api\/applications\/([^/]+)\/(approve|reject)$/);
     if (method === 'POST' && review) {
       const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const id = decodeURIComponent(review[1]), action = review[2], data = await body(request);
       const application = await cf().DB.prepare("SELECT * FROM access_applications WHERE id=? AND status='pending'").bind(id).first<Row>(); if (!application) throw new ApiError('找不到待審申請。', 404);
-      if (action === 'reject') await cf().DB.prepare("UPDATE access_applications SET status='rejected',reviewed_at=?,reviewed_by=? WHERE id=?").bind(now(), session.user_id, id).run();
-      else { const role: Role = data.role === 'teacher' ? 'teacher' : 'approved_user'; const timestamp = now(); let user = await cf().DB.prepare('SELECT * FROM users WHERE email_lookup=?').bind(application.email_lookup).first<Row>(); if (!user) { const userId = uuid(); await cf().DB.prepare("INSERT INTO users(id,email_lookup,email_cipher,role,status,created_at,updated_at) VALUES(?,?,?,?,'active',?,?)").bind(userId, application.email_lookup, application.email_cipher, role, timestamp, timestamp).run(); } else await cf().DB.prepare("UPDATE users SET role=?,status='active',updated_at=? WHERE id=?").bind(role, timestamp, user.id).run(); await cf().DB.prepare("UPDATE access_applications SET status='approved',approved_role=?,reviewed_at=?,reviewed_by=? WHERE id=?").bind(role, timestamp, session.user_id, id).run(); }
+      if (action === 'reject') await cf().DB.prepare("UPDATE access_applications SET status='rejected',pending_password_salt=NULL,pending_password_digest=NULL,reviewed_at=?,reviewed_by=? WHERE id=?").bind(now(), session.user_id, id).run();
+      else { const role: Role = data.role === 'teacher' ? 'teacher' : data.role === 'student' ? 'student' : 'approved_user'; if (!application.pending_password_salt || !application.pending_password_digest) throw new ApiError('這筆舊申請尚未設定密碼，請申請者重新送出申請。', 409); const timestamp = now(), email = await unseal(application.email_cipher); let user: Row | null = null; if (role === 'student') { if (!studentProfile(email)) throw new ApiError('學生帳號必須使用符合規則的龍門國中學生信箱。'); user = await ensureStudent(email); } else { user = await cf().DB.prepare('SELECT * FROM users WHERE email_lookup=?').bind(application.email_lookup).first<Row>(); if (!user) { const userId = uuid(); await cf().DB.prepare("INSERT INTO users(id,email_lookup,email_cipher,role,status,created_at,updated_at) VALUES(?,?,?,?,'active',?,?)").bind(userId, application.email_lookup, application.email_cipher, role, timestamp, timestamp).run(); user = await cf().DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<Row>(); } else await cf().DB.prepare("UPDATE users SET role=?,status='active',updated_at=? WHERE id=?").bind(role, timestamp, user.id).run(); } await cf().DB.batch([cf().DB.prepare('INSERT INTO credentials(user_id,password_salt,password_digest,failed_attempts,created_at,updated_at) VALUES(?,?,?,0,?,?) ON CONFLICT(user_id) DO UPDATE SET password_salt=excluded.password_salt,password_digest=excluded.password_digest,failed_attempts=0,locked_until=NULL,updated_at=excluded.updated_at').bind(user!.id, application.pending_password_salt, application.pending_password_digest, timestamp, timestamp),cf().DB.prepare("UPDATE access_applications SET status='approved',approved_role=?,pending_password_salt=NULL,pending_password_digest=NULL,reviewed_at=?,reviewed_by=? WHERE id=?").bind(role, timestamp, session.user_id, id)]); }
       await audit(session.user_id, `application.${action}`, 'application', id); return json({ ok: true });
     }
 
