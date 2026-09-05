@@ -321,7 +321,8 @@ async function handle(request: Request) {
       const data = await body(request), email = normalizeEmail(data.email), user = await findUser(email); await rateLimit(`password-login:${await ipDigest(request)}`, 20, 15 * 60);
       if (!user || user.status !== 'active') throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
       const credential = await cf().DB.prepare('SELECT * FROM credentials WHERE user_id=?').bind(user.id).first<Row>();
-      if (!credential || (credential.locked_until && Date.parse(credential.locked_until) > Date.now())) throw new ApiError('帳號暫時無法登入，請稍後再試。', 423);
+      if (!credential) throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
+      if (credential.locked_until && Date.parse(credential.locked_until) > Date.now()) throw new ApiError('帳號暫時無法登入，請於 15 分鐘後再試。', 423);
       const matches = await safeEqual(credential.password_digest, await passwordDigest(String(data.password || ''), credential.password_salt));
       if (!matches) { const failures = Number(credential.failed_attempts) + 1, locked = failures >= 5 ? new Date(Date.now() + 15 * 60_000).toISOString() : null; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=?,updated_at=? WHERE user_id=?').bind(failures, locked, now(), user.id).run(); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); }
       if (user.role === 'developer') { const enrollment = await cf().DB.prepare('SELECT * FROM totp_enrollments WHERE user_id=? AND enabled=1').bind(user.id).first<Row>(); if (!enrollment) throw new ApiError('開發者尚未完成動態驗證器設定。', 409); const counter = await verifyTotp(await unseal(enrollment.secret_cipher), data.otp, enrollment.last_counter); if (counter == null) throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); await cf().DB.prepare('UPDATE totp_enrollments SET last_counter=?,updated_at=? WHERE user_id=?').bind(counter, now(), user.id).run(); }
@@ -477,8 +478,8 @@ async function handle(request: Request) {
     }
 
     if (method === 'GET' && path === '/api/applications') {
-      await authenticate(request, ['developer']); const rows = await cf().DB.prepare('SELECT * FROM access_applications ORDER BY requested_at DESC LIMIT 500').all<Row>();
-      return json({ applications: await Promise.all(rows.results.map(async row => ({ ...row, email: await unseal(row.email_cipher), identity: await unseal(row.identity_cipher), workplace: await unseal(row.workplace_cipher), job_title: await unseal(row.job_title_cipher), hasPendingPassword: Boolean(row.pending_password_digest), email_cipher: undefined, identity_cipher: undefined, workplace_cipher: undefined, job_title_cipher: undefined, pending_password_salt: undefined, pending_password_digest: undefined }))) });
+      await authenticate(request, ['developer']); const rows = await cf().DB.prepare('SELECT a.*, EXISTS(SELECT 1 FROM users u JOIN credentials c ON c.user_id=u.id WHERE u.email_lookup=a.email_lookup AND u.status=\'active\') AS account_ready FROM access_applications a ORDER BY a.requested_at DESC LIMIT 500').all<Row>();
+      return json({ applications: await Promise.all(rows.results.map(async row => ({ ...row, email: await unseal(row.email_cipher), identity: await unseal(row.identity_cipher), workplace: await unseal(row.workplace_cipher), job_title: await unseal(row.job_title_cipher), hasPendingPassword: Boolean(row.pending_password_digest), accountReady: Number(row.account_ready) === 1, email_cipher: undefined, identity_cipher: undefined, workplace_cipher: undefined, job_title_cipher: undefined, pending_password_salt: undefined, pending_password_digest: undefined, account_ready: undefined }))) });
     }
     const review = path.match(/^\/api\/applications\/([^/]+)\/(approve|reject)$/);
     if (method === 'POST' && review) {
