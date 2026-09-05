@@ -436,6 +436,35 @@ async function handle(request: Request) {
       await authenticate(request, ['developer']); const result = await cf().DB.prepare("SELECT id,email_cipher FROM users WHERE role='teacher' AND status='active' ORDER BY created_at").all<Row>();
       return json({ teachers: await Promise.all(result.results.map(async row => ({ id: row.id, email: await unseal(row.email_cipher) }))) });
     }
+    if (method === 'GET' && path === '/api/users') {
+      await authenticate(request, ['developer']);
+      const rows = await cf().DB.prepare("SELECT u.*, CASE WHEN u.role='student' THEN COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=u.id),'') WHEN u.role='teacher' THEN COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM classes c WHERE c.teacher_id=u.id),'') ELSE '' END AS class_codes FROM users u WHERE u.role<>'developer' ORDER BY u.role,u.created_at DESC").all<Row>();
+      return json({ users: await Promise.all(rows.results.map(async row => ({ ...(await publicUser(row)), status: row.status, classCodes: row.class_codes || '' }))) });
+    }
+    const userAccount = path.match(/^\/api\/users\/([^/]+)$/);
+    if (method === 'DELETE' && userAccount) {
+      const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const userId = decodeURIComponent(userAccount[1]);
+      const target = await cf().DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<Row>(); if (!target) throw new ApiError('找不到此帳號。', 404);
+      if (target.id === session.user_id || target.role === 'developer') throw new ApiError('開發者帳號不能在此刪除。', 403);
+      const timestamp = now();
+      await cf().DB.batch([
+        cf().DB.prepare('UPDATE classes SET teacher_id=NULL WHERE teacher_id=?').bind(target.id),
+        cf().DB.prepare('UPDATE assignments SET teacher_id=?,updated_at=? WHERE teacher_id=?').bind(session.user_id, timestamp, target.id),
+        cf().DB.prepare('DELETE FROM invitation_codes WHERE created_by=? OR email_lookup=?').bind(target.id, target.email_lookup),
+        cf().DB.prepare('DELETE FROM reports WHERE student_id=?').bind(target.id),
+        cf().DB.prepare('DELETE FROM class_students WHERE student_id=?').bind(target.id),
+        cf().DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(target.id),
+        cf().DB.prepare('DELETE FROM credentials WHERE user_id=?').bind(target.id),
+        cf().DB.prepare('DELETE FROM totp_enrollments WHERE user_id=?').bind(target.id),
+        cf().DB.prepare('DELETE FROM privacy_acknowledgements WHERE user_id=?').bind(target.id),
+        cf().DB.prepare('DELETE FROM privacy_requests WHERE user_id=?').bind(target.id),
+        cf().DB.prepare('DELETE FROM access_applications WHERE email_lookup=?').bind(target.email_lookup),
+        cf().DB.prepare('DELETE FROM auth_challenges WHERE email_lookup=?').bind(target.email_lookup),
+        cf().DB.prepare('DELETE FROM developer_login_proofs WHERE email_lookup=?').bind(target.email_lookup),
+        cf().DB.prepare('DELETE FROM users WHERE id=?').bind(target.id),
+      ]);
+      await audit(session.user_id, 'account.deleted', 'user', target.id, 'success', { role: target.role }); return json({ ok: true });
+    }
     if (method === 'GET' && path === '/api/invitations') {
       const session = await authenticate(request, ['developer', 'teacher']); const rows = session.role === 'developer'
         ? await cf().DB.prepare('SELECT id,role,class_id,email_lookup,uses_remaining,expires_at,created_at FROM invitation_codes ORDER BY created_at DESC LIMIT 500').all<Row>()
