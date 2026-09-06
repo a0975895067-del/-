@@ -7,7 +7,7 @@ const SESSION_SECONDS = 8 * 60 * 60;
 const REPORT_DAYS = 365;
 
 class ApiError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
+  constructor(message: string, public status = 400, public details: Record<string, unknown> = {}, public headers: HeadersInit = {}) { super(message); }
 }
 
 const cf = () => env as unknown as Cloudflare.Env;
@@ -131,7 +131,15 @@ async function rateLimit(bucket: string, maximum: number, windowSeconds: number)
     await cf().DB.prepare('INSERT INTO rate_limits(bucket,count,reset_at) VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET count=1,reset_at=excluded.reset_at').bind(bucket, new Date(current + windowSeconds * 1000).toISOString()).run();
     return;
   }
-  if (Number(row.count) >= maximum) throw new ApiError('嘗試次數過多，請稍後再試。', 429);
+  const latestAllowedReset = current + windowSeconds * 1000;
+  if (Date.parse(row.reset_at) > latestAllowedReset) {
+    row.reset_at = new Date(latestAllowedReset).toISOString();
+    await cf().DB.prepare('UPDATE rate_limits SET reset_at=? WHERE bucket=?').bind(row.reset_at, bucket).run();
+  }
+  if (Number(row.count) >= maximum) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(row.reset_at) - current) / 1000));
+    throw new ApiError('重複登入或送出次數過多，系統已暫停操作；請於 15 分鐘後再登入。', 429, { retryAfterSeconds }, { 'retry-after': String(retryAfterSeconds) });
+  }
   await cf().DB.prepare('UPDATE rate_limits SET count=count+1 WHERE bucket=?').bind(bucket).run();
 }
 async function audit(actor: string | null, action: string, targetType = '', targetId = '', outcome = 'success', metadata: unknown = {}) {
@@ -322,10 +330,13 @@ async function handle(request: Request) {
       if (!user || user.status !== 'active') throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
       const credential = await cf().DB.prepare('SELECT * FROM credentials WHERE user_id=?').bind(user.id).first<Row>();
       if (!credential) throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
-      if (credential.locked_until && Date.parse(credential.locked_until) > Date.now()) throw new ApiError('帳號暫時無法登入，請於 15 分鐘後再試。', 423);
+      if (credential.locked_until && Date.parse(credential.locked_until) > Date.now()) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(credential.locked_until) - Date.now()) / 1000));
+        throw new ApiError('重複登入錯誤，帳號已暫停登入；請於 15 分鐘後再登入。', 423, { retryAfterSeconds }, { 'retry-after': String(retryAfterSeconds) });
+      }
       const matches = await safeEqual(credential.password_digest, await passwordDigest(String(data.password || ''), credential.password_salt));
-      if (!matches) { const failures = Number(credential.failed_attempts) + 1, locked = failures >= 5 ? new Date(Date.now() + 15 * 60_000).toISOString() : null; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=?,updated_at=? WHERE user_id=?').bind(failures, locked, now(), user.id).run(); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); }
-      if (user.role === 'developer') { const enrollment = await cf().DB.prepare('SELECT * FROM totp_enrollments WHERE user_id=? AND enabled=1').bind(user.id).first<Row>(); if (!enrollment) throw new ApiError('開發者尚未完成動態驗證器設定。', 409); const counter = await verifyTotp(await unseal(enrollment.secret_cipher), data.otp, enrollment.last_counter); if (counter == null) throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); await cf().DB.prepare('UPDATE totp_enrollments SET last_counter=?,updated_at=? WHERE user_id=?').bind(counter, now(), user.id).run(); }
+      if (!matches) { const failures = Number(credential.failed_attempts) + 1, locked = failures >= 5 ? new Date(Date.now() + 15 * 60_000).toISOString() : null; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=?,updated_at=? WHERE user_id=?').bind(failures, locked, now(), user.id).run(); if (locked) throw new ApiError('重複登入錯誤，帳號已暫停登入；請於 15 分鐘後再登入。', 423, { retryAfterSeconds: 15 * 60 }, { 'retry-after': String(15 * 60) }); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); }
+      if (user.role === 'developer') { const enrollment = await cf().DB.prepare('SELECT * FROM totp_enrollments WHERE user_id=? AND enabled=1').bind(user.id).first<Row>(); if (!enrollment) throw new ApiError('開發者尚未完成動態驗證器設定。', 409); const counter = await verifyTotp(await unseal(enrollment.secret_cipher), data.otp, enrollment.last_counter); if (counter == null) { const failures = Number(credential.failed_attempts) + 1, locked = failures >= 5 ? new Date(Date.now() + 15 * 60_000).toISOString() : null; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=?,updated_at=? WHERE user_id=?').bind(failures, locked, now(), user.id).run(); if (locked) throw new ApiError('重複登入錯誤，帳號已暫停登入；請於 15 分鐘後再登入。', 423, { retryAfterSeconds: 15 * 60 }, { 'retry-after': String(15 * 60) }); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); } await cf().DB.prepare('UPDATE totp_enrollments SET last_counter=?,updated_at=? WHERE user_id=?').bind(counter, now(), user.id).run(); }
       await cf().DB.prepare('UPDATE credentials SET failed_attempts=0,locked_until=NULL,updated_at=? WHERE user_id=?').bind(now(), user.id).run(); await acknowledge(user.id, data.privacyVersion); const session = await createSession(request, user); await audit(user.id, 'auth.password_login');
       return json({ user: session.user, csrfToken: session.csrfToken }, 200, { 'set-cookie': sessionCookie(session.token) });
     }
@@ -388,7 +399,7 @@ async function handle(request: Request) {
       const data = await body(request), email = normalizeEmail(data.email); if (data.privacyVersion !== PRIVACY_VERSION) throw new ApiError('請先確認個人資料告知事項。');
       if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 254) throw new ApiError('請輸入有效的電子郵件。');
       if (email === normalizeEmail(cf().DEVELOPER_EMAIL)) throw new ApiError('開發者帳號不使用一般申請流程。', 403);
-      await rateLimit(`direct-application-ip:${await ipDigest(request)}`, 5, 60 * 60); const lookup = await emailLookup(email); await rateLimit(`direct-application-email:${lookup}`, 3, 24 * 60 * 60);
+      await rateLimit(`direct-application-ip:${await ipDigest(request)}`, 5, 15 * 60); const lookup = await emailLookup(email); await rateLimit(`direct-application-email:${lookup}`, 3, 15 * 60);
       const pending = await cf().DB.prepare("SELECT id FROM access_applications WHERE email_lookup=? AND status='pending'").bind(lookup).first<Row>(); if (pending) throw new ApiError('此信箱已有待審申請，請勿重複送出。', 409);
       const salt = randomToken(24), password = String(data.password || ''), passwordHash = await passwordDigest(password, salt);
       const result = await makeApplication({ email_lookup: lookup, email_cipher: await seal(email) }, data, false, { salt, digest: passwordHash }); await audit(null, 'application.direct_submitted', 'application', result.id, 'success', { emailVerified: false }); return json({ ...result, notice: '申請已送出，目前為待開發者核可。開發者核准後，即可使用申請信箱與剛才設定的密碼登入。' }, 201);
@@ -564,7 +575,7 @@ async function handle(request: Request) {
     if (method === 'POST' && path === '/api/admin/purge') { const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const expired = now(); const reports = await cf().DB.prepare('DELETE FROM reports WHERE delete_after<?').bind(expired).run(); const sessions = await cf().DB.prepare('DELETE FROM sessions WHERE expires_at<?').bind(expired).run(); return json({ reports: reports.meta.changes, sessions: sessions.meta.changes }); }
     throw new ApiError('找不到此功能。', 404);
   } catch (error) {
-    if (error instanceof ApiError) return json({ error: error.message }, error.status);
+    if (error instanceof ApiError) return json({ error: error.message, ...error.details }, error.status, error.headers);
     console.error(error); return json({ error: '伺服器暫時無法處理，請稍後再試。' }, 500);
   }
 }
