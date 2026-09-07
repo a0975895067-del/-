@@ -550,25 +550,27 @@ async function handle(request: Request) {
     }
 
     if (method === 'POST' && path === '/api/reports') {
-      const session = await authenticate(request, ['student']); await requireCsrf(request, session); const data = await body(request), total = Number(data.totalQuestions), correct = Number(data.firstCorrect), hints = Number(data.hintsUsed || 0);
+      const session = await authenticate(request, ['student', 'approved_user']); await requireCsrf(request, session); const data = await body(request), total = Number(data.totalQuestions), correct = Number(data.firstCorrect), hints = Number(data.hintsUsed || 0);
       if (!Number.isInteger(total) || total < 1 || total > 100 || !Number.isInteger(correct) || correct < 0 || correct > total || !Number.isInteger(hints) || hints < 0 || hints > total) throw new ApiError('報告數據格式不正確。');
+      const requestedGrade = Number(data.grade), grade = session.role === 'student' ? Number(session.grade) : requestedGrade;
+      if (![7, 8, 9].includes(grade)) throw new ApiError('報告年級格式不正確。');
       const summary = JSON.stringify(data.unitSummary || {}), attempts = JSON.stringify(data.attempts || []); if (summary.length > 50_000 || attempts.length > 150_000) throw new ApiError('報告資料量過大。', 413);
       const id = uuid(), timestamp = now(), deleteAfter = new Date(Date.now() + REPORT_DAYS * 86400_000).toISOString();
-      await cf().DB.prepare('INSERT INTO reports(id,student_id,assignment_id,grade,unit_summary_cipher,attempts_cipher,total_questions,first_correct,hints_used,created_at,delete_after) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, session.user_id, null, Number(session.grade), await seal(summary), await seal(attempts), total, correct, hints, timestamp, deleteAfter).run(); return json({ id, deleteAfter }, 201);
+      await cf().DB.prepare('INSERT INTO reports(id,student_id,assignment_id,grade,unit_summary_cipher,attempts_cipher,total_questions,first_correct,hints_used,created_at,delete_after) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, session.user_id, null, grade, await seal(summary), await seal(attempts), total, correct, hints, timestamp, deleteAfter).run(); return json({ id, deleteAfter }, 201);
     }
     const reportId = path.match(/^\/api\/reports\/([^/]+)$/);
     if (method === 'GET' && reportId) {
-      const session = await authenticate(request, ['developer', 'teacher', 'student']), id = decodeURIComponent(reportId[1]); let report;
-      if (session.role === 'developer') report = await cf().DB.prepare('SELECT * FROM reports WHERE id=?').bind(id).first<Row>();
-      else if (session.role === 'student') report = await cf().DB.prepare('SELECT * FROM reports WHERE id=? AND student_id=?').bind(id, session.user_id).first<Row>();
-      else report = await cf().DB.prepare('SELECT r.* FROM reports r JOIN class_students cs ON cs.student_id=r.student_id JOIN classes c ON c.id=cs.class_id WHERE r.id=? AND c.teacher_id=?').bind(id, session.user_id).first<Row>();
+      const session = await authenticate(request, ['developer', 'teacher', 'student', 'approved_user']), id = decodeURIComponent(reportId[1]); let report;
+      if (session.role === 'developer') report = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r JOIN users u ON u.id=r.student_id WHERE r.id=?").bind(id).first<Row>();
+      else if (session.role === 'student' || session.role === 'approved_user') report = await cf().DB.prepare('SELECT * FROM reports WHERE id=? AND student_id=?').bind(id, session.user_id).first<Row>();
+      else report = await cf().DB.prepare('SELECT r.*,u.email_cipher AS student_email_cipher,c.code AS class_codes FROM reports r JOIN users u ON u.id=r.student_id JOIN class_students cs ON cs.student_id=r.student_id JOIN classes c ON c.id=cs.class_id WHERE r.id=? AND c.teacher_id=?').bind(id, session.user_id).first<Row>();
       if (!report) throw new ApiError('找不到報告或沒有權限。', 404); return json({ report: await decodeReport(report) });
     }
     if (method === 'GET' && path === '/api/reports') {
-      const session = await authenticate(request, ['developer', 'teacher', 'student']); let rows;
-      if (session.role === 'developer') rows = await cf().DB.prepare('SELECT * FROM reports ORDER BY created_at DESC LIMIT 2000').all<Row>();
-      else if (session.role === 'student') rows = await cf().DB.prepare('SELECT * FROM reports WHERE student_id=? ORDER BY created_at DESC').bind(session.user_id).all<Row>();
-      else rows = await cf().DB.prepare('SELECT DISTINCT r.* FROM reports r JOIN class_students cs ON cs.student_id=r.student_id JOIN classes c ON c.id=cs.class_id WHERE c.teacher_id=? ORDER BY r.created_at DESC').bind(session.user_id).all<Row>();
+      const session = await authenticate(request, ['developer', 'teacher', 'student', 'approved_user']); let rows;
+      if (session.role === 'developer') rows = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r JOIN users u ON u.id=r.student_id ORDER BY r.created_at DESC LIMIT 2000").all<Row>();
+      else if (session.role === 'student' || session.role === 'approved_user') rows = await cf().DB.prepare('SELECT * FROM reports WHERE student_id=? ORDER BY created_at DESC').bind(session.user_id).all<Row>();
+      else rows = await cf().DB.prepare('SELECT DISTINCT r.*,u.email_cipher AS student_email_cipher,c.code AS class_codes FROM reports r JOIN users u ON u.id=r.student_id JOIN class_students cs ON cs.student_id=r.student_id JOIN classes c ON c.id=cs.class_id WHERE c.teacher_id=? ORDER BY r.created_at DESC').bind(session.user_id).all<Row>();
       return json({ reports: await Promise.all(rows.results.map(decodeReport)) });
     }
     if (method === 'POST' && path === '/api/privacy-requests') { const session = await authenticate(request); await requireCsrf(request, session); const data = await body(request); if (!['access', 'copy', 'correct', 'restrict', 'delete'].includes(data.requestType)) throw new ApiError('請選擇有效的個資權利請求。'); const id = uuid(); await cf().DB.prepare("INSERT INTO privacy_requests(id,user_id,request_type,status,requested_at) VALUES(?,?,?,'pending',?)").bind(id, session.user_id, data.requestType, now()).run(); return json({ id, status: 'pending' }, 201); }
@@ -581,7 +583,10 @@ async function handle(request: Request) {
 }
 
 async function decodeReport(row: Row) {
-  return { ...row, unitSummary: JSON.parse(await unseal(row.unit_summary_cipher)), attempts: JSON.parse(await unseal(row.attempts_cipher)), unit_summary_cipher: undefined, attempts_cipher: undefined };
+  const report = { ...row, unitSummary: JSON.parse(await unseal(row.unit_summary_cipher)), attempts: JSON.parse(await unseal(row.attempts_cipher)), unit_summary_cipher: undefined, attempts_cipher: undefined };
+  if (row.student_email_cipher) report.student_email = await unseal(row.student_email_cipher);
+  delete report.student_email_cipher;
+  return report;
 }
 
 export const GET = handle;
