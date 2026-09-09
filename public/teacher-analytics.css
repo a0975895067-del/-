@@ -133,6 +133,36 @@ td.question-cell {
   background: #fff1cf;
 }
 
+.concept-analysis,
+.assignment-suggestion {
+  margin: 16px 0;
+  padding: 15px 17px;
+  border: 1px solid #b9d7c6;
+  border-left: 6px solid #4d8b69;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f3faf5, #fffaf0);
+  line-height: 1.75;
+}
+
+.concept-analysis h4 {
+  margin: 0 0 8px;
+  color: #356b59;
+}
+
+.concept-analysis p {
+  margin: 6px 0;
+}
+
+.concept-analysis small {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+}
+
+.assignment-suggestion {
+  margin: 0;
+}
+
 @media (max-width: 700px) {
   td.question-cell {
     min-width: 250px;
