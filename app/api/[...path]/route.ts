@@ -199,8 +199,11 @@ async function ensureStudent(email: string) {
       .bind(id, lookup, await seal(email), profile.grade, profile.classNumber, profile.seatNumber, timestamp, timestamp).run(); user = await cf().DB.prepare('SELECT * FROM users WHERE id=?').bind(id).first<Row>();
   }
   if (user?.role !== 'student' || user.status !== 'active') throw new ApiError('帳號狀態無法登入，請聯絡管理者。', 403);
-  await cf().DB.prepare('INSERT INTO classes(id,code,grade,class_number,created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(profile.code, profile.code, profile.grade, profile.classNumber, timestamp).run();
-  await cf().DB.prepare('INSERT INTO class_students(class_id,student_id,joined_at) VALUES(?,?,?) ON CONFLICT(class_id,student_id) DO NOTHING').bind(profile.code, user.id, timestamp).run();
+  const membership = await cf().DB.prepare('SELECT class_id FROM class_students WHERE student_id=? LIMIT 1').bind(user!.id).first<Row>();
+  if (!membership && Number(user!.class_number) === profile.classNumber) {
+    await cf().DB.prepare('INSERT INTO classes(id,code,grade,class_number,created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(profile.code, profile.code, profile.grade, profile.classNumber, timestamp).run();
+    await cf().DB.prepare('INSERT INTO class_students(class_id,student_id,joined_at) VALUES(?,?,?) ON CONFLICT(class_id,student_id) DO NOTHING').bind(profile.code, user!.id, timestamp).run();
+  }
   return user!;
 }
 async function acknowledge(userId: string, version: unknown) {
@@ -449,10 +452,41 @@ async function handle(request: Request) {
     }
     if (method === 'GET' && path === '/api/users') {
       await authenticate(request, ['developer']);
-      const rows = await cf().DB.prepare("SELECT u.*, CASE WHEN u.role='student' THEN COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=u.id),'') WHEN u.role='teacher' THEN COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM classes c WHERE c.teacher_id=u.id),'') ELSE '' END AS class_codes FROM users u WHERE u.role<>'developer' ORDER BY u.role,u.created_at DESC").all<Row>();
-      return json({ users: await Promise.all(rows.results.map(async row => ({ ...(await publicUser(row)), status: row.status, classCodes: row.class_codes || '' }))) });
+      const rows = await cf().DB.prepare("SELECT u.*, CASE WHEN u.role='student' THEN COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=u.id),'') WHEN u.role='teacher' THEN COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM classes c WHERE c.teacher_id=u.id),'') ELSE '' END AS class_codes, CASE WHEN u.role='student' THEN COALESCE((SELECT GROUP_CONCAT(c.id, ',') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=u.id),'') ELSE '' END AS class_ids FROM users u WHERE u.role<>'developer' ORDER BY u.role,u.created_at DESC").all<Row>();
+      return json({ users: await Promise.all(rows.results.map(async row => ({ ...(await publicUser(row)), status: row.status, classCodes: row.class_codes || '', classIds: row.class_ids || '' }))) });
     }
     const userAccount = path.match(/^\/api\/users\/([^/]+)$/);
+    if (method === 'PATCH' && userAccount) {
+      const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const userId = decodeURIComponent(userAccount[1]), data = await body(request);
+      const target = await cf().DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<Row>(); if (!target) throw new ApiError('找不到此帳號。', 404);
+      if (target.id === session.user_id || target.role === 'developer') throw new ApiError('開發者帳號不能在此修改。', 403);
+      const role: Role = data.role === 'student' ? 'student' : data.role === 'teacher' ? 'teacher' : data.role === 'approved_user' ? 'approved_user' : (() => { throw new ApiError('角色設定不正確。'); })();
+      const email = normalizeEmail(textValue(data.email, 254)); if (!/^\S+@\S+\.\S+$/.test(email)) throw new ApiError('請輸入有效的電子郵件。');
+      if (email === normalizeEmail(cf().DEVELOPER_EMAIL)) throw new ApiError('此信箱保留給開發者帳號。', 403);
+      const lookup = await emailLookup(email), duplicate = await cf().DB.prepare('SELECT id FROM users WHERE email_lookup=? AND id<>?').bind(lookup, target.id).first<Row>(); if (duplicate) throw new ApiError('此信箱已由其他帳號使用。', 409);
+      const classId = textValue(data.classId, 80, false), profile = role === 'student' ? studentProfile(email) : null;
+      const targetClass = classId ? await cf().DB.prepare('SELECT id,grade,class_number FROM classes WHERE id=?').bind(classId).first<Row>() : null;
+      if (classId && !targetClass) throw new ApiError('找不到指定班級。', 404);
+      if (role === 'student' && !targetClass && !profile) throw new ApiError('非龍門國中格式的學生信箱必須先選擇班級。');
+      if (role === 'student' && profile && targetClass && Number(profile.grade) !== Number(targetClass.grade)) throw new ApiError('信箱年級與所選班級年級不相符。');
+      const timestamp = now(), grade = role === 'student' ? Number(targetClass?.grade ?? profile?.grade) : null, classNumber = role === 'student' ? Number(targetClass?.class_number ?? 0) : null, seatNumber = role === 'student' ? Number(profile?.seatNumber ?? target.seat_number ?? 0) || null : null;
+      const statements = [
+        cf().DB.prepare('UPDATE users SET email_lookup=?,email_cipher=?,role=?,grade=?,class_number=?,seat_number=?,updated_at=? WHERE id=?').bind(lookup, await seal(email), role, grade, classNumber, seatNumber, timestamp, target.id),
+        cf().DB.prepare('DELETE FROM class_students WHERE student_id=?').bind(target.id),
+        cf().DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(target.id),
+        cf().DB.prepare('UPDATE access_applications SET email_lookup=?,email_cipher=? WHERE email_lookup=?').bind(lookup, await seal(email), target.email_lookup),
+        cf().DB.prepare('UPDATE invitation_codes SET email_lookup=? WHERE email_lookup=?').bind(lookup, target.email_lookup),
+        cf().DB.prepare('DELETE FROM auth_challenges WHERE email_lookup=?').bind(target.email_lookup),
+        cf().DB.prepare('DELETE FROM developer_login_proofs WHERE email_lookup=?').bind(target.email_lookup),
+      ];
+      if (role === 'student' && targetClass) statements.push(cf().DB.prepare('INSERT INTO class_students(class_id,student_id,joined_at) VALUES(?,?,?)').bind(targetClass.id, target.id, timestamp));
+      if (role !== 'teacher') {
+        statements.push(cf().DB.prepare('UPDATE classes SET teacher_id=NULL WHERE teacher_id=?').bind(target.id));
+        statements.push(cf().DB.prepare('UPDATE assignments SET teacher_id=?,updated_at=? WHERE teacher_id=?').bind(session.user_id, timestamp, target.id));
+      }
+      await cf().DB.batch(statements); await audit(session.user_id, 'account.updated', 'user', target.id, 'success', { role, classId: targetClass?.id || null, emailChanged: lookup !== target.email_lookup });
+      return json({ ok: true, userId: target.id, role, classId: targetClass?.id || null });
+    }
     if (method === 'DELETE' && userAccount) {
       const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const userId = decodeURIComponent(userAccount[1]);
       const target = await cf().DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<Row>(); if (!target) throw new ApiError('找不到此帳號。', 404);
@@ -561,14 +595,14 @@ async function handle(request: Request) {
     const reportId = path.match(/^\/api\/reports\/([^/]+)$/);
     if (method === 'GET' && reportId) {
       const session = await authenticate(request, ['developer', 'teacher', 'student', 'approved_user']), id = decodeURIComponent(reportId[1]); let report;
-      if (session.role === 'developer') report = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r JOIN users u ON u.id=r.student_id WHERE r.id=?").bind(id).first<Row>();
+      if (session.role === 'developer') report = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,u.role AS student_role,u.status AS student_status,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r JOIN users u ON u.id=r.student_id WHERE r.id=?").bind(id).first<Row>();
       else if (session.role === 'student' || session.role === 'approved_user') report = await cf().DB.prepare('SELECT * FROM reports WHERE id=? AND student_id=?').bind(id, session.user_id).first<Row>();
       else report = await cf().DB.prepare('SELECT r.*,u.email_cipher AS student_email_cipher,c.code AS class_codes FROM reports r JOIN users u ON u.id=r.student_id JOIN class_students cs ON cs.student_id=r.student_id JOIN classes c ON c.id=cs.class_id WHERE r.id=? AND c.teacher_id=?').bind(id, session.user_id).first<Row>();
       if (!report) throw new ApiError('找不到報告或沒有權限。', 404); return json({ report: await decodeReport(report) });
     }
     if (method === 'GET' && path === '/api/reports') {
       const session = await authenticate(request, ['developer', 'teacher', 'student', 'approved_user']); let rows;
-      if (session.role === 'developer') rows = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r JOIN users u ON u.id=r.student_id ORDER BY r.created_at DESC LIMIT 2000").all<Row>();
+      if (session.role === 'developer') rows = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,u.role AS student_role,u.status AS student_status,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r JOIN users u ON u.id=r.student_id ORDER BY r.created_at DESC LIMIT 2000").all<Row>();
       else if (session.role === 'student' || session.role === 'approved_user') rows = await cf().DB.prepare('SELECT * FROM reports WHERE student_id=? ORDER BY created_at DESC').bind(session.user_id).all<Row>();
       else rows = await cf().DB.prepare('SELECT DISTINCT r.*,u.email_cipher AS student_email_cipher,c.code AS class_codes FROM reports r JOIN users u ON u.id=r.student_id JOIN class_students cs ON cs.student_id=r.student_id JOIN classes c ON c.id=cs.class_id WHERE c.teacher_id=? ORDER BY r.created_at DESC').bind(session.user_id).all<Row>();
       return json({ reports: await Promise.all(rows.results.map(decodeReport)) });

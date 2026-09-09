@@ -180,9 +180,21 @@
       student: '學生',
       teacher: '教師',
       approved_user: '一般核准使用者',
-    };
+    }, classOptions = (row) => `<option value="">未分班</option>${state.classes.map((cls) => `<option value="${esc(cls.id)}" ${String(row.classIds || '').split(',').includes(String(cls.id)) ? 'selected' : ''}>${esc(cls.code)} 班（${cls.grade}年級）</option>`).join('')}`;
     $('#accounts').innerHTML =
-      `<h2>帳號管理</h2><p>只有開發者可永久刪除帳號。刪除後，該帳號將立即登出；學生的測驗報告及個人資料也會一併刪除，無法復原。</p>${state.users.map((row) => `<article class="item"><div class="item-head"><div><h3>${esc(row.email)}</h3><p>角色：${esc(roleName[row.role] || row.role)}<br>班級：${esc(row.classCodes || '尚未分班')}<br>狀態：${esc(row.status)}</p></div><button class="danger" type="button" data-delete-account="${esc(row.id)}" data-account-email="${esc(row.email)}">永久刪除帳號</button></div></article>`).join('') || '<p>目前沒有可管理的學生、教師或一般使用者帳號。</p>'}`;
+      `<h2>帳號、角色與分班管理</h2><p>只有開發者可更正信箱、變更角色與分班。儲存後該使用者會登出，必須以更正後的信箱重新登入；既有測驗報告會保留在同一帳號下。</p>${state.users.map((row) => `<article class="item"><div class="item-head"><div><h3>${esc(row.email)}</h3><p>目前角色：${esc(roleName[row.role] || row.role)}｜班級：${esc(row.classCodes || '未分班')}｜狀態：${esc(row.status)}</p></div></div><form class="form-grid account-editor" data-account-editor="${esc(row.id)}"><label>更正電子郵件<input name="email" type="email" maxlength="254" required value="${esc(row.email)}"></label><label>角色<select name="role"><option value="student" ${row.role === 'student' ? 'selected' : ''}>學生</option><option value="teacher" ${row.role === 'teacher' ? 'selected' : ''}>教師</option><option value="approved_user" ${row.role === 'approved_user' ? 'selected' : ''}>一般核准使用者</option></select></label><label>學生分班<select name="classId" ${row.role === 'student' ? '' : 'disabled'}>${classOptions(row)}</select></label><div class="button-row"><button class="primary" type="submit">儲存信箱、角色與分班</button><button class="danger" type="button" data-delete-account="${esc(row.id)}" data-account-email="${esc(row.email)}">永久刪除帳號</button></div></form></article>`).join('') || '<p>目前沒有可管理的學生、教師或一般使用者帳號。</p>'}`;
+    document.querySelectorAll('[data-account-editor]').forEach((form) => {
+      const role = form.elements.role, classField = form.elements.classId;
+      role.onchange = () => { classField.disabled = role.value !== 'student'; };
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        if (!confirm('確定儲存這個帳號的信箱、角色與分班嗎？')) return;
+        try {
+          await api(`/api/users/${encodeURIComponent(form.dataset.accountEditor)}`, { method: 'PATCH', body: JSON.stringify({ email: form.elements.email.value, role: role.value, classId: role.value === 'student' ? classField.value : '' }) });
+          await refresh(); alert('帳號資料已更新；該使用者需以目前信箱重新登入。');
+        } catch (error) { alert(error.message); }
+      };
+    });
     document.querySelectorAll('[data-delete-account]').forEach(
       (button) =>
         (button.onclick = async () => {
@@ -523,7 +535,8 @@
     $('#refreshAnalytics').onclick = refresh;
   }
   function reports() {
-    const studentById = new Map(
+    const reportRoleName = { student: '學生', teacher: '教師', approved_user: '一般核准使用者' },
+      studentById = new Map(
         Object.values(state.students)
           .flat()
           .map((row) => [row.id, row]),
@@ -535,6 +548,8 @@
           )
         : [],
       waiting = learners.filter((row) => !reported.has(row.id)),
+      unassignedReports = state.reports.filter((row) => !row.class_codes).length,
+      approvedUserReports = state.reports.filter((row) => row.student_role === 'approved_user').length,
       seconds = (value) => {
         const total = Math.max(0, Math.round(Number(value || 0) / 1000));
         return total < 60
@@ -555,7 +570,7 @@
       return `<section class="concept-analysis"><h4>觀念分析與下一步</h4>${analysis.wrongChoices.length ? `<p><strong>學生曾選錯：</strong>${analysis.wrongChoices.map(esc).join('、')}</p>` : ''}<p><strong>可能的學習卡點：</strong>${esc(analysis.misconception)}</p><p><strong>建議先確認：</strong>${esc(analysis.prerequisites)}</p><p><strong>建議練習單元：</strong>${esc(analysis.suggestedUnit)}</p><p><strong>建議題型：</strong>${analysis.suggestedQuestions.map(esc).join('、')}</p><small>${esc(analysis.caution)}</small></section>`;
     };
     $('#reports').innerHTML =
-      `<div class="item-head"><div><h2>${isDeveloper() ? '全校與已核准使用者報告' : '我的班級測驗報告'}</h2><p>已收到 ${state.reports.length} 份報告。展開報告即可逐題查看選項、點選順序、答對／答錯、提示與作答時間。</p></div><button id="refreshReports" type="button">重新整理報告</button></div>${isDeveloper() && waiting.length ? `<details class="item"><summary>${waiting.length} 位使用者尚無報告</summary><p>以下帳號尚無已完成並成功上傳的測驗報告：</p><ul>${waiting.map((row) => `<li>${esc(row.email)}${row.classCodes ? ` （${esc(row.classCodes)} 班）` : ''}</li>`).join('')}</ul></details>` : ''}${
+      `<div class="item-head"><div><h2>${isDeveloper() ? '全校、未分班與各角色報告' : '我的班級測驗報告'}</h2><p>已收到 ${state.reports.length} 份報告。${isDeveloper() ? `其中未分班 ${unassignedReports} 份、一般核准使用者 ${approvedUserReports} 份；報告不會因尚未分班而隱藏。` : ''}展開報告即可逐題查看選項、點選順序、答對／答錯、提示與作答時間。</p></div><button id="refreshReports" type="button">重新整理報告</button></div>${isDeveloper() && waiting.length ? `<details class="item"><summary>${waiting.length} 位使用者尚無報告</summary><p>以下帳號尚無已完成並成功上傳的測驗報告：</p><ul>${waiting.map((row) => `<li>${esc(row.email)}${row.classCodes ? ` （${esc(row.classCodes)} 班）` : '（未分班）'}</li>`).join('')}</ul></details>` : ''}${
         state.reports
           .map((report) => {
             const student = studentById.get(report.student_id),
@@ -565,7 +580,8 @@
                 `學生識別碼 ${String(report.student_id).slice(0, 10)}…`,
               classInfo =
                 report.class_codes || student?.classCodes || '尚未分班';
-            return `<article class="item"><div class="item-head"><div><h3>${esc(email)}</h3><p>班級：${esc(classInfo)}｜${report.grade}年級｜總題數 ${report.total_questions}｜首次答對 ${report.first_correct}｜提示 ${report.hints_used}</p><small>${esc(new Date(report.created_at).toLocaleString())}</small></div></div><details><summary>查看完整測驗與逐題作答歷程</summary><table><tr><th>單元</th><th>題數</th><th>錯誤</th><th>提示</th></tr>${Object.entries(
+            const reportRole = reportRoleName[report.student_role || student?.role] || report.student_role || student?.role || (isDeveloper() ? '未標示角色' : '學生');
+            return `<article class="item"><div class="item-head"><div><h3>${esc(email)}</h3><p>角色：${esc(reportRole)}｜分班：${esc(classInfo)}｜${report.grade}年級｜總題數 ${report.total_questions}｜首次答對 ${report.first_correct}｜提示 ${report.hints_used}</p><small>${esc(new Date(report.created_at).toLocaleString())}</small></div></div><details><summary>查看完整測驗與逐題作答歷程</summary><table><tr><th>單元</th><th>題數</th><th>錯誤</th><th>提示</th></tr>${Object.entries(
               report.unitSummary || {},
             )
               .map(
