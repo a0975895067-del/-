@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+const dashboard = readFileSync(new URL('../public/secure-dashboard.js', import.meta.url), 'utf8');
+const route = readFileSync(new URL('../app/api/[...path]/route.ts', import.meta.url), 'utf8');
+const html = readFileSync(new URL('../public/teacher-dashboard.html', import.meta.url), 'utf8');
+
+for (let round = 1; round <= 3; round++) {
+  assert.match(route, /session\.role === 'developer'.*SELECT r\.\*,u\.email_cipher/s, '開發者報告查詢必須直接涵蓋全部報告');
+  assert.match(route, /u\.role AS student_role,u\.status AS student_status/, '報告必須附帶目前角色與狀態');
+  assert.match(route, /COALESCE\(\(SELECT GROUP_CONCAT\(c\.code,[\s\S]*?\),'\'\) AS class_codes/, '未分班報告必須以空班級回傳而非被排除');
+  assert.match(dashboard, /全體使用者完整檢測報告/);
+  assert.match(dashboard, /全部角色/);
+  assert.match(dashboard, /全部班級/);
+  assert.match(dashboard, /角色與分班歸類統計/);
+  assert.match(dashboard, /查看完整測驗與逐題作答歷程/);
+  assert.match(dashboard, /修正此人的信箱、角色或分班/);
+  assert.match(html, /secure-dashboard\.js\?v=20260910-all-reports/);
+  console.log(`第 ${round} 輪：全角色、全班級、未分班、完整內容、歸類分析與資料修改入口均存在。`);
+}
+
+console.log('開發者全體報告稽核完成：3 輪全數通過。');

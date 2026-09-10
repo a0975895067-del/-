@@ -2,6 +2,31 @@
   margin: 18px 0;
 }
 
+.report-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(150px, 1fr)) minmax(120px, .6fr);
+  gap: 12px;
+  align-items: end;
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #f5faf6;
+}
+
+.filter-result {
+  display: grid;
+  place-items: center;
+  min-height: 52px;
+  border-radius: 14px;
+  background: var(--green2);
+}
+
+.filter-result strong { font-size: 1.45rem; }
+.filter-result span { color: var(--muted); font-size: .88rem; }
+.manage-account { white-space: normal; max-width: 210px; }
+.account-highlight { outline: 4px solid #e3ba67; outline-offset: 4px; }
+
 .metric small {
   display: block;
   color: var(--muted);
@@ -164,6 +189,7 @@ td.question-cell {
 }
 
 @media (max-width: 700px) {
+  .report-filters { grid-template-columns: 1fr; }
   td.question-cell {
     min-width: 250px;
   }

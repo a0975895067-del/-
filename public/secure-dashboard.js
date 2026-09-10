@@ -14,6 +14,7 @@
       );
   let csrfToken = '',
     user = null,
+    reportView = { search: '', role: 'all', classCode: 'all' },
     state = {
       classes: [],
       assignments: [],
@@ -440,6 +441,7 @@
   function analytics() {
     const units = {},
       questions = {},
+      cohorts = {},
       learners = new Set(),
       pct = (part, total) => (total ? Math.round((part / total) * 100) : 0),
       levelName = {
@@ -452,6 +454,12 @@
       };
     state.reports.forEach((report) => {
       learners.add(report.student_id);
+      const roleLabel = ({ student: '學生', teacher: '教師', approved_user: '一般核准使用者' })[report.student_role] || report.student_role || '未標示角色',
+        classLabel = report.class_codes || '未分班',
+        cohortKey = `${roleLabel}|${classLabel}`,
+        cohort = cohorts[cohortKey] || (cohorts[cohortKey] = { roleLabel, classLabel, reports: 0, attempts: 0, needs: 0, learners: new Set() });
+      cohort.reports++;
+      cohort.learners.add(report.student_id);
       (report.attempts || []).forEach((attempt) => {
         const grade = Number(report.grade) || '',
           unit = String(attempt.unit || '未標示單元'),
@@ -492,6 +500,8 @@
               hints: 0,
               students: new Set(),
             });
+        cohort.attempts++;
+        cohort.needs += needs ? 1 : 0;
         for (const row of [unitRow, questionRow]) {
           row.count++;
           row.clean += wrong === 0 && !hint ? 1 : 0;
@@ -512,6 +522,7 @@
           b.wrong - a.wrong ||
           b.count - a.count,
       ),
+      cohortRows = Object.values(cohorts).sort((a, b) => b.needs / Math.max(1, b.attempts) - a.needs / Math.max(1, a.attempts) || b.reports - a.reports),
       totalAnswers = questionRows.reduce((sum, row) => sum + row.count, 0),
       totalNeeds = questionRows.reduce((sum, row) => sum + row.needs, 0),
       priority = (row) => {
@@ -523,7 +534,7 @@
             : '<span class="risk low">目前穩定</span>';
       };
     $('#analytics').innerHTML =
-      `<div class="item-head"><div><h2>${isDeveloper() ? '全站題目統整分析' : '班級題目統整分析'}</h2><p>依目前帳號可查看的報告統計；「需加強」表示該次作答曾答錯或使用提示，不以考試分數排名。</p></div><button id="refreshAnalytics" type="button">重新整理分析</button></div><div class="grid analytics-metrics"><div class="metric"><span>納入報告</span><strong>${state.reports.length}</strong></div><div class="metric"><span>作答學生</span><strong>${learners.size}</strong></div><div class="metric"><span>累計作答題次</span><strong>${totalAnswers}</strong></div><div class="metric"><span>需回顧題次</span><strong>${totalNeeds}</strong><small>${pct(totalNeeds, totalAnswers)}%</small></div></div><details class="analysis-block" open><summary>單元統整（由需加強率排序）</summary><table><tr><th>年級</th><th>單元</th><th>學生數</th><th>作答題次</th><th>一次答對率</th><th>需加強率</th><th>錯誤嘗試</th><th>提示</th><th>教學判讀</th></tr>${unitRows.map((row) => `<tr><td>${row.grade}</td><td class="wrap-cell">${esc(row.unit)}</td><td>${row.students.size}</td><td>${row.count}</td><td>${pct(row.clean, row.count)}%</td><td>${pct(row.needs, row.count)}%</td><td>${row.wrong}</td><td>${row.hints}</td><td>${priority(row)}</td></tr>`).join('') || '<tr><td colspan="9">尚無可統計的作答資料。</td></tr>'}</table></details><details class="analysis-block" open><summary>逐題統整（最需要回顧的題目優先）</summary><p class="analysis-note">相同年級、單元、難度及題目文字會合併計算；新完成的測驗會同時保留易、中、難標示。</p><table><tr><th>年級</th><th>單元</th><th>難度</th><th>題目</th><th>學生數</th><th>出現次數</th><th>一次答對率</th><th>曾答錯率</th><th>提示率</th><th>教學判讀</th></tr>${
+      `<div class="item-head"><div><h2>${isDeveloper() ? '全站題目統整分析' : '班級題目統整分析'}</h2><p>${isDeveloper() ? '開發者統計會納入所有角色、所有班級與未分班使用者的全部報告。' : '依目前教師可查看的班級報告統計。'}「需加強」表示該次作答曾答錯或使用提示，不以考試分數排名。</p></div><button id="refreshAnalytics" type="button">重新整理分析</button></div><div class="grid analytics-metrics"><div class="metric"><span>納入報告</span><strong>${state.reports.length}</strong></div><div class="metric"><span>作答使用者</span><strong>${learners.size}</strong></div><div class="metric"><span>累計作答題次</span><strong>${totalAnswers}</strong></div><div class="metric"><span>需回顧題次</span><strong>${totalNeeds}</strong><small>${pct(totalNeeds, totalAnswers)}%</small></div></div>${isDeveloper() ? `<details class="analysis-block" open><summary>角色與分班歸類統計</summary><table><tr><th>角色</th><th>班級狀態</th><th>使用者數</th><th>報告數</th><th>作答題次</th><th>需加強題次</th><th>需加強率</th></tr>${cohortRows.map((row) => `<tr><td>${esc(row.roleLabel)}</td><td>${esc(row.classLabel)}</td><td>${row.learners.size}</td><td>${row.reports}</td><td>${row.attempts}</td><td>${row.needs}</td><td>${pct(row.needs, row.attempts)}%</td></tr>`).join('') || '<tr><td colspan="7">尚無可統計資料。</td></tr>'}</table></details>` : ''}<details class="analysis-block" open><summary>單元統整（由需加強率排序）</summary><table><tr><th>年級</th><th>單元</th><th>學生數</th><th>作答題次</th><th>一次答對率</th><th>需加強率</th><th>錯誤嘗試</th><th>提示</th><th>教學判讀</th></tr>${unitRows.map((row) => `<tr><td>${row.grade}</td><td class="wrap-cell">${esc(row.unit)}</td><td>${row.students.size}</td><td>${row.count}</td><td>${pct(row.clean, row.count)}%</td><td>${pct(row.needs, row.count)}%</td><td>${row.wrong}</td><td>${row.hints}</td><td>${priority(row)}</td></tr>`).join('') || '<tr><td colspan="9">尚無可統計的作答資料。</td></tr>'}</table></details><details class="analysis-block" open><summary>逐題統整（最需要回顧的題目優先）</summary><p class="analysis-note">相同年級、單元、難度及題目文字會合併計算；新完成的測驗會同時保留易、中、難標示。</p><table><tr><th>年級</th><th>單元</th><th>難度</th><th>題目</th><th>學生數</th><th>出現次數</th><th>一次答對率</th><th>曾答錯率</th><th>提示率</th><th>教學判讀</th></tr>${
         questionRows
           .slice(0, 300)
           .map(
@@ -550,6 +561,17 @@
       waiting = learners.filter((row) => !reported.has(row.id)),
       unassignedReports = state.reports.filter((row) => !row.class_codes).length,
       approvedUserReports = state.reports.filter((row) => row.student_role === 'approved_user').length,
+      roleOptions = [...new Set(state.reports.map((row) => row.student_role || 'unmarked'))],
+      classOptions = [...new Set(state.reports.map((row) => row.class_codes || 'unassigned'))],
+      visibleReports = state.reports.filter((report) => {
+        const email = report.student_email || studentById.get(report.student_id)?.email || '',
+          role = report.student_role || 'unmarked',
+          classCode = report.class_codes || 'unassigned',
+          search = reportView.search.trim().toLowerCase();
+        return (reportView.role === 'all' || reportView.role === role) &&
+          (reportView.classCode === 'all' || reportView.classCode === classCode) &&
+          (!search || `${email} ${report.student_id}`.toLowerCase().includes(search));
+      }),
       seconds = (value) => {
         const total = Math.max(0, Math.round(Number(value || 0) / 1000));
         return total < 60
@@ -570,8 +592,8 @@
       return `<section class="concept-analysis"><h4>觀念分析與下一步</h4>${analysis.wrongChoices.length ? `<p><strong>學生曾選錯：</strong>${analysis.wrongChoices.map(esc).join('、')}</p>` : ''}<p><strong>可能的學習卡點：</strong>${esc(analysis.misconception)}</p><p><strong>建議先確認：</strong>${esc(analysis.prerequisites)}</p><p><strong>建議練習單元：</strong>${esc(analysis.suggestedUnit)}</p><p><strong>建議題型：</strong>${analysis.suggestedQuestions.map(esc).join('、')}</p><small>${esc(analysis.caution)}</small></section>`;
     };
     $('#reports').innerHTML =
-      `<div class="item-head"><div><h2>${isDeveloper() ? '全校、未分班與各角色報告' : '我的班級測驗報告'}</h2><p>已收到 ${state.reports.length} 份報告。${isDeveloper() ? `其中未分班 ${unassignedReports} 份、一般核准使用者 ${approvedUserReports} 份；報告不會因尚未分班而隱藏。` : ''}展開報告即可逐題查看選項、點選順序、答對／答錯、提示與作答時間。</p></div><button id="refreshReports" type="button">重新整理報告</button></div>${isDeveloper() && waiting.length ? `<details class="item"><summary>${waiting.length} 位使用者尚無報告</summary><p>以下帳號尚無已完成並成功上傳的測驗報告：</p><ul>${waiting.map((row) => `<li>${esc(row.email)}${row.classCodes ? ` （${esc(row.classCodes)} 班）` : '（未分班）'}</li>`).join('')}</ul></details>` : ''}${
-        state.reports
+      `<div class="item-head"><div><h2>${isDeveloper() ? '全體使用者完整檢測報告' : '我的班級測驗報告'}</h2><p>已收到 ${state.reports.length} 份報告。${isDeveloper() ? `所有角色及未分班報告都會顯示，報告不會因尚未分班而隱藏；其中未分班 ${unassignedReports} 份、一般核准使用者 ${approvedUserReports} 份。可依角色、分班或信箱歸類，並前往帳號管理修正資料。` : ''}展開報告即可逐題查看題目、選項、點選順序、答對／答錯、提示、原因與作答時間。</p></div><button id="refreshReports" type="button">重新整理報告</button></div>${isDeveloper() ? `<div class="report-filters" aria-label="報告歸類篩選"><label>搜尋信箱或識別碼<input id="reportSearch" value="${esc(reportView.search)}" placeholder="輸入關鍵字"></label><label>角色<select id="reportRole"><option value="all">全部角色</option>${roleOptions.map((value) => `<option value="${esc(value)}" ${reportView.role === value ? 'selected' : ''}>${esc(reportRoleName[value] || (value === 'unmarked' ? '未標示角色' : value))}</option>`).join('')}</select></label><label>分班<select id="reportClass"><option value="all">全部班級</option>${classOptions.map((value) => `<option value="${esc(value)}" ${reportView.classCode === value ? 'selected' : ''}>${esc(value === 'unassigned' ? '未分班' : value)}</option>`).join('')}</select></label><div class="filter-result"><strong>${visibleReports.length}</strong><span>份符合條件</span></div></div>` : ''}${isDeveloper() && waiting.length ? `<details class="item"><summary>${waiting.length} 位使用者尚無報告</summary><p>以下帳號尚無已完成並成功上傳的測驗報告：</p><ul>${waiting.map((row) => `<li>${esc(row.email)}｜${esc(reportRoleName[row.role] || row.role)}${row.classCodes ? `｜${esc(row.classCodes)} 班` : '｜未分班'}</li>`).join('')}</ul></details>` : ''}${
+        visibleReports
           .map((report) => {
             const student = studentById.get(report.student_id),
               email =
@@ -581,7 +603,7 @@
               classInfo =
                 report.class_codes || student?.classCodes || '尚未分班';
             const reportRole = reportRoleName[report.student_role || student?.role] || report.student_role || student?.role || (isDeveloper() ? '未標示角色' : '學生');
-            return `<article class="item"><div class="item-head"><div><h3>${esc(email)}</h3><p>角色：${esc(reportRole)}｜分班：${esc(classInfo)}｜${report.grade}年級｜總題數 ${report.total_questions}｜首次答對 ${report.first_correct}｜提示 ${report.hints_used}</p><small>${esc(new Date(report.created_at).toLocaleString())}</small></div></div><details><summary>查看完整測驗與逐題作答歷程</summary><table><tr><th>單元</th><th>題數</th><th>錯誤</th><th>提示</th></tr>${Object.entries(
+            return `<article class="item report-item"><div class="item-head"><div><h3>${esc(email)}</h3><p>角色：${esc(reportRole)}｜分班：${esc(classInfo)}｜${report.grade}年級｜總題數 ${report.total_questions}｜首次答對 ${report.first_correct}｜提示 ${report.hints_used}</p><small>${esc(new Date(report.created_at).toLocaleString())}</small></div>${isDeveloper() && state.users.some((row) => row.id === report.student_id) ? `<button type="button" class="manage-account" data-manage-account="${esc(report.student_id)}">修正此人的信箱、角色或分班</button>` : ''}</div><details><summary>查看完整測驗與逐題作答歷程</summary><table><tr><th>單元</th><th>題數</th><th>錯誤</th><th>提示</th></tr>${Object.entries(
               report.unitSummary || {},
             )
               .map(
@@ -595,6 +617,25 @@
           .join('') || '<p>目前沒有報告。</p>'
       }`;
     $('#refreshReports').onclick = refresh;
+    if (isDeveloper()) {
+      const applyFilter = () => {
+        reportView = { search: $('#reportSearch').value, role: $('#reportRole').value, classCode: $('#reportClass').value };
+        reports();
+      };
+      $('#reportSearch').onchange = applyFilter;
+      $('#reportSearch').onkeydown = (event) => { if (event.key === 'Enter') applyFilter(); };
+      $('#reportRole').onchange = applyFilter;
+      $('#reportClass').onchange = applyFilter;
+      document.querySelectorAll('[data-manage-account]').forEach((button) => {
+        button.onclick = () => {
+          document.querySelector('[data-tab="accounts"]')?.click();
+          const editor = document.querySelector(`[data-account-editor="${CSS.escape(button.dataset.manageAccount)}"]`);
+          editor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          editor?.classList.add('account-highlight');
+          setTimeout(() => editor?.classList.remove('account-highlight'), 2200);
+        };
+      });
+    }
   }
   function render() {
     setupTabs();
