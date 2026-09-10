@@ -17,7 +17,7 @@ const exteriorTriangleFig=(a,b)=>svgWrap(`<path d="M95 180 L365 180 L220 50 Z M3
 const parallelogramFig=a=>svgWrap(`<path d="M100 175 L175 55 L420 55 L345 175 Z" fill="#eef6f2" stroke="#405346" stroke-width="4"/><path d="M113 157 A34 34 0 0 1 140 175" fill="none" stroke="#c46f55" stroke-width="3"/><text x="145" y="157" font-size="18">${a}°</text><text x="335" y="157" font-size="20">?</text>`);
 const quadRatioFig=(b,c)=>svgWrap(`<path d="M105 175 L165 45 L405 75 L365 185 Z" fill="#eef6f2" stroke="#405346" stroke-width="4"/><text x="120" y="155" font-size="18">A</text><text x="180" y="72" font-size="17">${b}°</text><text x="355" y="97" font-size="17">${c}°</text><text x="315" y="166" font-size="18">D</text><text x="175" y="218" font-size="17">∠A：∠D＝2：3</text>`);
 const figureStyle=document.createElement('style');figureStyle.textContent='.question-figure{margin:14px 0 18px;padding:12px;background:var(--light);border:1px solid var(--line);border-radius:15px}.question-figure svg{display:block;width:100%;max-height:280px}.question-figure text{font-family:"Microsoft JhengHei",system-ui,sans-serif;fill:var(--ink)}';document.head.append(figureStyle);
-const seventhUnits=['數與數線','整數四則運算','分配律與運算規則','指數記法與科學記號','因數與倍數','倍數判別與質數','一元一次方程式','一元一次不等式','比例與比值','工作率與反比','坐標與線型函數','資料分析','會考素養閱讀'];
+const seventhUnits=['數與數線','整數四則運算','分配律與運算規則','指數記法與科學記號','因數與倍數','倍數判別與質數','一元一次方程式','一元一次不等式','二元一次聯立方程式','比例與比值','工作率與反比','坐標與線型函數','資料分析','會考素養閱讀'];
 const eighthOfficialUnits=['乘法公式與多項式','平方根與畢氏定理','因式分解','一元二次方程式','統計資料處理圖表','數列與等差數列','函數及其圖形','三角形的性質與尺規作圖','平行與四邊形','會考素養閱讀'];
 const ninthOfficialUnits=[...new Set([...(typeof window!=='undefined'&&window.grade9OfficialUnits||['相似形與比例線段','圓與圓周角','幾何推理與證明','二次函數','資料分析與機率','空間幾何與立體圖形']),'會考素養閱讀'])];
 const reviewUnits=['數與量總複習','代數總複習','坐標與函數總複習','幾何總複習','統計與機率總複習','閱讀素養綜合'];
@@ -215,7 +215,10 @@ function reviewQuestion(name,lv,seed){
 }
 generatedUnitSet=function(name,count){
  const cooldown=loadCooldown(),configKey=[studentScope(),grade,name,level,count].join('§'),entry=cooldownEntry(cooldown,configKey),blocked=new Set(entry.runs.slice(-5).flat());
- const imported=grade==='7'&&level==='easy'&&typeof window!=='undefined'&&window.grade7JsonQuestionsFor?window.grade7JsonQuestionsFor(name,level):[];
+ const imported=[
+  ...(grade==='7'&&level==='easy'&&typeof window!=='undefined'&&window.grade7JsonQuestionsFor?window.grade7JsonQuestionsFor(name,level):[]),
+  ...(typeof window!=='undefined'&&window.importedBulkQuestionsFor?window.importedBulkQuestionsFor(grade,name,level):[])
+ ];
  let sessionKeys=new Set(),sessionStems=new Set(),lastOptionKey='',out=[];
  const textBudget=Math.floor(count*.10);
  for(let slot=0;slot<count;slot++){
@@ -223,7 +226,7 @@ generatedUnitSet=function(name,count){
   for(let attempt=0;attempt<960;attempt++){
    const diverseSeed=Math.floor(Math.random()*1000000)+slot*97+(entry.seq||0)*1009+attempt*7919;
     let candidate;if(imported.length&&attempt<imported.length)candidate=imported[(slot+(entry.seq||0)+attempt)%imported.length];else if(grade==='review')candidate=reviewQuestion(name,level,diverseSeed);else if(grade==='7'&&typeof window!=='undefined'&&window.grade7ImportedQuestion)candidate=window.grade7ImportedQuestion(name,level,diverseSeed);else if(grade==='8'&&typeof window!=='undefined'&&window.grade8DiverseQuestion)candidate=window.grade8DiverseQuestion(name,level,diverseSeed)||generatedUnitSetV21(name,1)[0];else if(grade==='9'&&typeof window!=='undefined'&&window.grade9DiverseQuestion)candidate=window.grade9DiverseQuestion(name,level,diverseSeed);else candidate=generatedUnitSetV21(name,1)[0];if(!candidate)continue;
-   if(figureUnit(name))candidate=calcFallback(name,level,diverseSeed+attempt*17);
+   if(figureUnit(name)&&candidate.requiresFigure!==false)candidate=calcFallback(name,level,diverseSeed+attempt*17);
    else if(slot>=textBudget&&!computationalOptions(candidate))candidate=calcFallback(name,level,diverseSeed+attempt*17);
    candidate=repairGeometryVisual(candidate,name,level,diverseSeed+attempt*17);
    candidate=repairCoordinateVisual(candidate,name,level,diverseSeed+attempt*17);
