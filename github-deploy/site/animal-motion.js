@@ -558,7 +558,7 @@
   const frog = document.querySelector('.summer-frog');
   if (frog) {
     frog.classList.add('frog-image-sprite', 'head-led');
-    frog.innerHTML = `<img class="frog-sprite" src="assets/cute-green-frog-v1.png" alt="可愛的側面綠色小青蛙">`;
+    if (!window.MATH_GITHUB_DEMO) frog.innerHTML = `<img class="frog-sprite" src="assets/cute-green-frog-v1.png" alt="可愛的側面綠色小青蛙">`;
   }
   const duck = document.querySelector('.summer-duck');
   if (duck) {
@@ -601,17 +601,17 @@
   const winterPenguin = document.querySelector('.winter-penguin');
   if (winterPenguin) {
     winterPenguin.classList.add('head-led', 'full-winter-penguin');
-    winterPenguin.innerHTML = `<img class="winter-penguin-sprite" src="assets/winter-penguin-cute-v2.png" alt="可愛完整全身企鵝"><span class="animal-feet penguin-feet" aria-hidden="true"><i></i><i></i></span>`;
+    if (!window.MATH_GITHUB_DEMO) winterPenguin.innerHTML = `<img class="winter-penguin-sprite" src="assets/winter-penguin-cute-v2.png" alt="可愛完整全身企鵝"><span class="animal-feet penguin-feet" aria-hidden="true"><i></i><i></i></span>`;
   }
   const winterWolf = document.querySelector('.winter-fox');
   if (winterWolf) {
     winterWolf.classList.add('head-led', 'full-winter-wolf');
-    winterWolf.innerHTML = `<img class="winter-wolf-sprite" src="assets/winter-arctic-wolf-cute-v2.png" alt="可愛完整全身白色北極狼"><span class="animal-feet quadruped-feet wolf-feet" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
+    if (!window.MATH_GITHUB_DEMO) winterWolf.innerHTML = `<img class="winter-wolf-sprite" src="assets/winter-arctic-wolf-cute-v2.png" alt="可愛完整全身白色北極狼"><span class="animal-feet quadruped-feet wolf-feet" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
   }
   const winterPolarBear = document.querySelector('.winter-polarbear');
   if (winterPolarBear) {
     winterPolarBear.classList.add('head-led', 'full-winter-polarbear');
-    winterPolarBear.innerHTML = `<img class="winter-polarbear-sprite" src="assets/winter-polar-bear-cute-v2.png" alt="可愛完整全身北極熊"><span class="animal-feet quadruped-feet bear-feet" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
+    if (!window.MATH_GITHUB_DEMO) winterPolarBear.innerHTML = `<img class="winter-polarbear-sprite" src="assets/winter-polar-bear-cute-v2.png" alt="可愛完整全身北極熊"><span class="animal-feet quadruped-feet bear-feet" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
   }
   document.querySelectorAll('.autumn-squirrel,.autumn-hedgehog').forEach(el => {
     const glyph = el.textContent.trim();
