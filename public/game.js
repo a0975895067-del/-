@@ -151,12 +151,20 @@ function repairGeometryVisual(x,name,lv,seed){
  if(!/三角|幾何|相似|四邊形|平行|尺規|畢氏/.test(name))return x;
  if(/四邊形|平行/.test(name)){
   if(lv==='medium')return {...x,fig:parallelogramFig(a)};
-  if(lv==='hard'){const c=80+(z%3)*5,total=360-b-c,answer=`${total*2/5}°`,wrong=[`${total*3/5}°`,`${total}°`,`${180-total*2/5}°`],choice=pickOptions(answer,wrong,z%4);return {...x,t:`【會考挑戰】依圖，四邊形中 ∠B=${b}°、∠C=${c}°，且 ∠A：∠D=2：3，∠A 是多少？`,o:choice.o,a:choice.a,h:'先用四邊形內角和求 A+D，再按 2：3 分配。',e:`A+D=360−${b}−${c}=${total}°，A=${total}×2/5=${total*2/5}°。`,fig:quadRatioFig(b,c)};}
+  if(lv==='hard'){const hardB=35+(z%17)*5,hardC=40+(Math.floor(z/17)%15)*5,total=360-hardB-hardC,answer=`${total*2/5}°`,wrong=[`${total*3/5}°`,`${total}°`,`${180-total*2/5}°`],choice=pickOptions(answer,wrong,z%4);return {...x,sourceId:null,id:null,baseStem:null,t:`【會考挑戰】依圖，四邊形中 ∠B=${hardB}°、∠C=${hardC}°，且 ∠A：∠D=2：3，∠A 是多少？`,o:choice.o,a:choice.a,h:'先用四邊形內角和求 A+D，再按 2：3 分配。',e:`A+D=360−${hardB}−${hardC}=${total}°，A=${total}×2/5=${total*2/5}°。`,fig:quadRatioFig(hardB,hardC)};}
   return x;
  }
  if(/畢氏|相似/.test(name))return x;
  if(lv==='medium')return {...x,fig:exteriorTriangleFig(a,b)};
- if(lv==='hard'){const third=180-a-b,exterior=a+b,difference=Math.abs(exterior-third),answer=`${difference}°`,wrong=[`${third}°`,`${exterior}°`,`${Math.abs(a-b)}°`],choice=pickOptions(answer,wrong,z%4);return {...x,t:`【會考挑戰】依圖先求外角，再與第三個內角比較。兩者相差多少度？`,o:choice.o,a:choice.a,h:'外角等於兩個遠內角和；第三內角由 180° 扣除兩個已知角。',e:`外角=${a}+${b}=${exterior}°，第三內角=180−${a}−${b}=${third}°，相差${difference}°。`,fig:exteriorTriangleFig(a,b)};}
+ if(lv==='hard'){
+  const third=180-a-b,exterior=a+b,difference=Math.abs(exterior-third),mode=Math.floor(z/20)%4,gcd=(m,n)=>n?gcd(n,m%n):m;
+  let t,answer,wrong,h,e;
+  if(mode===0){t=`圖中兩個遠內角為${a}°、${b}°。先求外角與第三內角，兩者相差多少度？`;answer=`${difference}°`;wrong=[`${third}°`,`${exterior}°`,`${Math.abs(a-b)}°`];h='外角等於兩個遠內角和；第三內角由180°扣除兩個已知角。';e=`外角=${a}+${b}=${exterior}°，第三內角=180−${a}−${b}=${third}°，相差${difference}°。`;}
+  else if(mode===1){const d=gcd(exterior,third);t=`圖中兩個遠內角為${a}°、${b}°。此外角與第三內角的最簡整數比為何？`;answer=`${exterior/d}：${third/d}`;wrong=[`${third/d}：${exterior/d}`,`${exterior}：${third}`,'1：1',`${exterior/d+1}：${third/d}`].filter((v,i,s)=>v!==answer&&s.indexOf(v)===i).slice(0,3);h='先分別求外角與第三內角，再把比約成最簡整數比。';e=`外角=${exterior}°、第三內角=${third}°，同除以${d}，得到${answer}。`;}
+  else if(mode===2){t=`圖中兩個遠內角為${a}°、${b}°。若第三內角再被角平分線平分，每一小角是多少度？`;answer=`${third/2}°`;wrong=[`${third}°`,`${exterior/2}°`,`${90-third/2}°`];h='先用三角形內角和求第三內角，再除以2。';e=`第三內角=180−${a}−${b}=${third}°，平分後每一角為${third/2}°。`;}
+  else{t=`圖中兩個遠內角為${a}°、${b}°，求右側所標示的外角度數。`;answer=`${exterior}°`;wrong=[`${third}°`,`${a}°`,`${b}°`,`${exterior+10}°`].filter((v,i,s)=>v!==answer&&s.indexOf(v)===i).slice(0,3);h='三角形的一個外角等於兩個不相鄰內角的和。';e=`${a}°+${b}°=${exterior}°。`;}
+  const choice=pickOptions(answer,wrong,z%4);return {...x,sourceId:null,id:null,baseStem:null,t:`【會考挑戰】${t}`,o:choice.o,a:choice.a,h,e,fig:exteriorTriangleFig(a,b)};
+ }
  return x;
 }
 function repairCoordinateVisual(x,name,lv,seed){
@@ -215,7 +223,8 @@ function reviewQuestion(name,lv,seed){
 }
 generatedUnitSet=function(name,count){
  const cooldown=loadCooldown(),configKey=[studentScope(),grade,name,level,count].join('§'),entry=cooldownEntry(cooldown,configKey),blocked=new Set(entry.runs.slice(-5).flat());
- const imported=[
+ const approved=typeof window!=='undefined'&&window.approvedReviewedQuestionsFor?window.approvedReviewedQuestionsFor(grade,name,level):[];
+ const imported=approved.length?approved:[
   ...(grade==='7'&&level==='easy'&&typeof window!=='undefined'&&window.grade7JsonQuestionsFor?window.grade7JsonQuestionsFor(name,level):[]),
   ...(typeof window!=='undefined'&&window.importedBulkQuestionsFor?window.importedBulkQuestionsFor(grade,name,level):[])
  ];
