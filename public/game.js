@@ -192,6 +192,27 @@ function normalizedStemKey(x){return [x.u,String(x.baseStem||x.t||'').replace(/�
 function normalizedOptionKey(x){return [...x.o].map(v=>String(v).replace(/\s+/g,' ').trim()).sort().join('|')}
 function normalizedQuestionKey(x){return [x.sourceId||x.id||normalizedStemKey(x),normalizedOptionKey(x)].join('§')}
 function reshuffleAnswers(x){const correct=x.o[x.a],arr=[...x.o];for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}x.o=arr;x.a=arr.indexOf(correct);return x}
+let secureSeedQueue=[];
+async function loadSecureSeeds(name,count){
+ secureSeedQueue=[];
+ if(!window.MathSecureApi?.api||!window.MathStudentAuth?.isVerified)return;
+ try{
+  const query=new URLSearchParams({grade,unit:name,level,count:String(count)}),data=await window.MathSecureApi.api(`/api/questions/seeds?${query}`);
+  secureSeedQueue=Array.isArray(data.seeds)?data.seeds.map(row=>Number(row.seed)).filter(Number.isFinite):[];
+ }catch{secureSeedQueue=[];}
+}
+function nextSecureSeed(fallback){const value=secureSeedQueue.shift();return Number.isFinite(value)?value:fallback;}
+function intermediateStepDistractors(candidate,lv,seed){
+ const x={...candidate,o:[...candidate.o]};
+ if(lv==='easy'||!Array.isArray(x.o)||x.o.length!==4)return x;
+ const correct=String(x.o[x.a]??'').trim(),match=correct.match(/^([－-]?\d+(?:\.\d+)?)(.*)$/);
+ if(!match)return x;
+ const suffix=match[2],correctNumber=match[1].replace('－','-'),tokens=[...String(`${x.h||''} ${x.e||''}`).matchAll(/[－-]?\d+(?:\.\d+)?/g)].map(m=>m[0].replace('－','-'));
+ const intermediate=tokens.filter((value,index,all)=>value!==correctNumber&&all.indexOf(value)===index).map(value=>`${value}${suffix}`);
+ const existing=x.o.filter((_,index)=>index!==x.a).map(String),wrong=[...intermediate,...existing].filter((value,index,all)=>value!==correct&&all.indexOf(value)===index).slice(0,3);
+ if(wrong.length<3)return x;
+ const picked=pickOptions(correct,wrong,Math.abs(seed)%4);x.o=picked.o;x.a=picked.a;x.distractorPolicy='intermediate-step';return x;
+}
 function applyStemFrame(candidate,index){
  const x={...candidate,o:[...candidate.o]},correct=String(x.o[x.a]),wrong=x.o.filter((_,i)=>i!==x.a).map(String),mode=index%6,style=Math.floor(index/6)%8;
  const scene=['課堂個人練習','小組討論紀錄','校園任務卡','學習扶助挑戰','數學筆記整理','會考複習活動','生活情境練習','闖關檢核站'][style];
@@ -233,7 +254,7 @@ generatedUnitSet=function(name,count){
  for(let slot=0;slot<count;slot++){
   let chosen=null,chosenKey='',fallback=null,fallbackKey='';
   for(let attempt=0;attempt<960;attempt++){
-   const diverseSeed=Math.floor(Math.random()*1000000)+slot*97+(entry.seq||0)*1009+attempt*7919;
+   const diverseSeed=nextSecureSeed(Math.floor(Math.random()*1000000)+slot*97+(entry.seq||0)*1009+attempt*7919);
     let candidate;if(imported.length&&attempt<imported.length)candidate=imported[(slot+(entry.seq||0)+attempt)%imported.length];else if(grade==='review')candidate=reviewQuestion(name,level,diverseSeed);else if(grade==='7'&&typeof window!=='undefined'&&window.grade7ImportedQuestion)candidate=window.grade7ImportedQuestion(name,level,diverseSeed);else if(grade==='8'&&typeof window!=='undefined'&&window.grade8DiverseQuestion)candidate=window.grade8DiverseQuestion(name,level,diverseSeed)||generatedUnitSetV21(name,1)[0];else if(grade==='9'&&typeof window!=='undefined'&&window.grade9DiverseQuestion)candidate=window.grade9DiverseQuestion(name,level,diverseSeed);else candidate=generatedUnitSetV21(name,1)[0];if(!candidate)continue;
    if(figureUnit(name)&&candidate.requiresFigure!==false)candidate=calcFallback(name,level,diverseSeed+attempt*17);
    else if(slot>=textBudget&&!computationalOptions(candidate))candidate=calcFallback(name,level,diverseSeed+attempt*17);
@@ -241,6 +262,7 @@ generatedUnitSet=function(name,count){
    candidate=repairCoordinateVisual(candidate,name,level,diverseSeed+attempt*17);
    candidate=sanitizeAnswerLeakingFigure(candidate,name);
    candidate=readingStem(candidate,diverseSeed+slot+entry.seq);
+   candidate=intermediateStepDistractors(candidate,level,diverseSeed);
    candidate=reshuffleAnswers(candidate);
     const key=normalizedQuestionKey(candidate),stemKey=normalizedStemKey(candidate),optionKey=normalizedOptionKey(candidate);if(sessionKeys.has(key)||sessionStems.has(stemKey)||optionKey===lastOptionKey)continue;
     if(!fallback){fallback=candidate;fallbackKey=key;fallback.stemKey=stemKey;fallback.optionKey=optionKey;}
@@ -256,7 +278,7 @@ renderUnits();
 function shuffled(items){return [...items].sort(()=>Math.random()-.5);}
 function arrangeWithoutConsecutiveOptions(items){const pending=[...items],out=[];while(pending.length){const previous=out.length?normalizedOptionKey(out[out.length-1]):'';let index=pending.findIndex(item=>normalizedOptionKey(item)!==previous);if(index<0)index=0;out.push(pending.splice(index,1)[0]);}return out;}
 function generatedAll(count){const topics=[...new Set(pool().map(x=>x.u))],cooldown=loadCooldown(),configKey=[studentScope(),grade,'all',level,count].join('§'),entry=cooldownEntry(cooldown,configKey),blocked=new Set(entry.runs.slice(-5).flat()),out=[],seen=new Set(),stems=new Set();let lastOptionKey='',attempts=0;while(out.length<count&&attempts<count*1200){const topic=topics[attempts%topics.length],candidate=generatedUnitSet(topic,1)[0];attempts++;if(!candidate)continue;const key=normalizedQuestionKey(candidate),stemKey=normalizedStemKey(candidate),optionKey=normalizedOptionKey(candidate);if(seen.has(key)||stems.has(stemKey)||blocked.has(key)||optionKey===lastOptionKey)continue;seen.add(key);stems.add(stemKey);lastOptionKey=optionKey;out.push(candidate);}entry.runs.push([...seen]);entry.runs=entry.runs.slice(-5);entry.seq=(entry.seq||0)+1;cooldown[configKey]=entry;saveCooldown(cooldown);return out;}
-$('#start').onclick=()=>{if(!window.MathStudentAuth||!window.MathStudentAuth.isVerified){$('#setupNote').textContent='請先完成學生信箱驗證。';return;}const generated=['7','8','9','review'].includes(grade);const base=generated?(unit==='all'?generatedAll(questionCount):generatedUnitSet(unit,questionCount)):(unit==='all'?pool():current());if(base.length<questionCount){$('#setupNote').textContent=`「${unit}」本次只能產生 ${base.length} 題不重複題目；請更換題數、難度或重新整理後再試。`;return;}session=arrangeWithoutConsecutiveOptions(shuffled(base)).slice(0,questionCount);idx=0;correctCount=0;hintCount=0;misses={};errorDetails=[];$('#setup').classList.add('hidden');$('#game').classList.remove('hidden');show();};
+$('#start').onclick=async()=>{if(!window.MathStudentAuth||!window.MathStudentAuth.isVerified){$('#setupNote').textContent='請先完成學生信箱驗證。';return;}$('#start').disabled=true;$('#setupNote').textContent='正在依已審查題型準備本次不重複題目…';await loadSecureSeeds(unit==='all'?'全部單元':unit,questionCount);const generated=['7','8','9','review'].includes(grade);const base=generated?(unit==='all'?generatedAll(questionCount):generatedUnitSet(unit,questionCount)):(unit==='all'?pool():current());$('#start').disabled=false;if(base.length<questionCount){$('#setupNote').textContent=`「${unit}」本次只能產生 ${base.length} 題不重複題目；請更換題數、難度或重新整理後再試。`;return;}session=arrangeWithoutConsecutiveOptions(shuffled(base)).slice(0,questionCount);idx=0;correctCount=0;hintCount=0;misses={};errorDetails=[];$('#setup').classList.add('hidden');$('#game').classList.remove('hidden');show();};
 function show(){const x=session[idx];usedHint=false;correct=false;questionStartedAt=Date.now();$('#progress').textContent=`第 ${idx+1} / ${session.length} 題`;$('#score').textContent=`目前答對 ${correctCount} 題`;$('#bar').style.width=`${idx/session.length*100}%`;$('#tag').textContent=`${grade==='review'?'第一至六冊會考總複習':grade+'年級'}｜${x.u}｜${x.l==='easy'?'易':x.l==='medium'?'中':'難'}`;$('#question').textContent=x.t;let visual=$('#questionVisual');if(!visual){visual=document.createElement('div');visual.id='questionVisual';visual.className='question-figure';$('#question').insertAdjacentElement('afterend',visual);}const figureIsRelevant=Boolean(x.fig);visual.innerHTML=figureIsRelevant?x.fig:'';visual.classList.toggle('hidden',!figureIsRelevant);$('#feedback').textContent='先完成作答；答錯時系統會記錄需要加強的觀念。';$('#feedback').className='feedback answer-feedback';$('#hintFeedback').textContent='需要時再打開提示，先試著找出已知條件。';$('#whyFeedback').textContent='答錯後可查看觀念與計算理由。';$('#next').classList.add('hidden');$('#why').disabled=true;const box=$('#answers');box.innerHTML='';x.o.forEach((v,i)=>{const b=document.createElement('button');b.textContent=String.fromCharCode(65+i)+'. '+v;b.onclick=()=>answer(i,b);box.append(b);});document.dispatchEvent(new CustomEvent('math-question-shown',{detail:{index:idx+1,grade:grade==='review'?'第一至六冊會考總複習':grade+'年級',unit:x.u,level:x.l,question:x.t,options:x.o,startedAt:new Date(questionStartedAt).toISOString()}}));}
 function answer(i,b){if(correct)return;const x=session[idx],isCorrect=i===x.a,elapsedMs=Math.max(0,Date.now()-questionStartedAt);document.dispatchEvent(new CustomEvent('math-answer',{detail:{index:idx+1,selectedIndex:i,selectedOption:x.o[i],correct:isCorrect,correctOption:x.o[x.a],elapsedMs}}));if(isCorrect){correct=true;b.classList.add('good');correctCount++;$('#score').textContent=`目前答對 ${correctCount} 題`;$('#feedback').textContent=usedHint?'答對！你能運用提示修正解法。':'答對！這題能獨立完成。';$('#feedback').className='feedback answer-feedback ok';$('#next').classList.remove('hidden');}else{b.classList.add('bad');misses[x.u]=(misses[x.u]||0)+1;errorDetails.push({unit:x.u,level:x.l,question:x.t,selected:x.o[i],correct:x.o[x.a],hint:x.h,explanation:x.e});$('#feedback').textContent='這個選項還不正確。請先查看左側提示，再重新比較選項。';$('#feedback').className='feedback answer-feedback no';$('#why').disabled=false;}}
 $('#hint').onclick=()=>{if(!usedHint)hintCount++;$('#hintFeedback').textContent=`提示：${session[idx].h}`;$('#hintFeedback').className='help-content revealed';usedHint=true;document.dispatchEvent(new CustomEvent('math-hint',{detail:{index:idx+1,text:session[idx].h,elapsedMs:Math.max(0,Date.now()-questionStartedAt)}}));};

@@ -88,6 +88,14 @@ async function verifyTotp(secret: string, otp: unknown, lastCounter: number | nu
 function inviteCode() {
   const bytes = new Uint8Array(9); crypto.getRandomValues(bytes); return base32Encode(bytes).match(/.{1,4}/g)!.join('-');
 }
+function secureVariantIndexes(count: number, capacity: number) {
+  const values = new Set<number>();
+  while (values.size < count) {
+    const random = new Uint32Array(1); crypto.getRandomValues(random);
+    values.add(random[0] % capacity);
+  }
+  return [...values];
+}
 
 function json(data: unknown, status = 200, extra: HeadersInit = {}) {
   const headers = new Headers(extra);
@@ -581,6 +589,25 @@ async function handle(request: Request) {
       else if (session.role === 'teacher') result = await cf().DB.prepare('SELECT * FROM assignments WHERE teacher_id=? ORDER BY created_at DESC').bind(session.user_id).all<Row>();
       else result = await cf().DB.prepare("SELECT a.* FROM assignments a JOIN class_students cs ON cs.class_id=a.class_id WHERE cs.student_id=? AND a.status='active' ORDER BY a.created_at DESC").bind(session.user_id).all<Row>();
       return json({ assignments: result.results });
+    }
+
+    if (method === 'GET' && path === '/api/questions/seeds') {
+      const session = await authenticate(request, ['developer', 'teacher', 'student', 'approved_user']);
+      const grade = url.searchParams.get('grade') || '', unit = textValue(url.searchParams.get('unit'), 120), level = url.searchParams.get('level') || '';
+      const count = Number(url.searchParams.get('count') || 20);
+      if (!['7', '8', '9', 'review'].includes(grade)) throw new ApiError('年級格式不正確。');
+      if (!['easy', 'medium', 'hard'].includes(level)) throw new ApiError('難度格式不正確。');
+      if (![10, 15, 20].includes(count)) throw new ApiError('題數必須為10、15或20。');
+      await rateLimit(`question-seeds:${session.user_id}`, 60, 60);
+      const capacity = level === 'easy' ? 3000 : level === 'medium' ? 2000 : 1500;
+      const seedOffset = level === 'easy' ? 0 : level === 'medium' ? 3000 : 5000;
+      const indexes = secureVariantIndexes(Math.min(capacity, count * 40), capacity);
+      const unitDigest = (await digest(`${grade}:${unit}`)).slice(0, 12);
+      return json({
+        grade, unit, level, capacity,
+        policy: { reviewedTemplateRequired: true, intermediateStepDistractors: level !== 'easy', cooldownRuns: 5 },
+        seeds: indexes.map((index) => ({ variantId: `${unitDigest}-${level}-${index}`, seed: seedOffset + index })),
+      });
     }
 
     if (method === 'POST' && path === '/api/reports') {
