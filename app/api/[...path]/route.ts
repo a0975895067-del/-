@@ -245,7 +245,7 @@ async function requireCsrf(request: Request, session: Row) {
 }
 
 async function makeApplication(row: Row, data: Row, emailVerified = true, pendingCredential: Row | null = null) {
-  const identity = textValue(data.identity, 80), workplace = textValue(data.workplace, 120), jobTitle = textValue(data.jobTitle, 120);
+  const identity = textValue(data.identity, 80), workplace = textValue(data.workplace, 120, false), jobTitle = textValue(data.jobTitle, 120, false);
   const id = uuid();
   await cf().DB.prepare("INSERT INTO access_applications(id,email_lookup,email_cipher,identity_cipher,workplace_cipher,job_title_cipher,email_verified,pending_password_salt,pending_password_digest,status,requested_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?)")
     .bind(id, row.email_lookup, row.email_cipher, await seal(identity), await seal(workplace), await seal(jobTitle), emailVerified ? 1 : 0, pendingCredential?.salt || null, pendingCredential?.digest || null, now()).run();
