@@ -10,12 +10,14 @@ for (let round = 1; round <= 3; round++) {
   assert.match(route, /u\.role AS student_role,u\.status AS student_status/, '報告必須附帶目前角色與狀態');
   assert.match(route, /COALESCE\(\(SELECT GROUP_CONCAT\(c\.code,[\s\S]*?\),'\'\) AS class_codes/, '未分班報告必須以空班級回傳而非被排除');
   assert.match(dashboard, /全體使用者完整檢測報告/);
-  assert.match(dashboard, /全部角色/);
-  assert.match(dashboard, /全部班級/);
+  assert.match(dashboard, /roleOptions = \[\.\.\.new Set\(\[/, '角色選項必須由完整角色清單、帳號及報告共同建立');
+  assert.match(dashboard, /state\.classes\.map\(\(row\) => row\.code\)/, '班級選項必須包含沒有報告的班級');
+  assert.match(dashboard, /所有角色與班級的報告涵蓋狀態/);
+  assert.match(dashboard, /尚無已完成並成功上傳的報告/);
   assert.match(dashboard, /角色與分班歸類統計/);
   assert.match(dashboard, /查看完整測驗與逐題作答歷程/);
   assert.match(dashboard, /修正此人的信箱、角色或分班/);
-  assert.match(html, /secure-dashboard\.js\?v=20260910-all-reports/);
+  assert.match(html, /secure-dashboard\.js\?v=20260916-report-coverage/);
   console.log(`第 ${round} 輪：全角色、全班級、未分班、完整內容、歸類分析與資料修改入口均存在。`);
 }
 

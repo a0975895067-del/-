@@ -553,16 +553,44 @@
           .map((row) => [row.id, row]),
       ),
       reported = new Set(state.reports.map((row) => row.student_id)),
-      learners = isDeveloper()
-        ? state.users.filter((row) =>
-            ['student', 'approved_user'].includes(row.role),
-          )
-        : [],
+      learners = isDeveloper() ? state.users : [],
       waiting = learners.filter((row) => !reported.has(row.id)),
       unassignedReports = state.reports.filter((row) => !row.class_codes).length,
       approvedUserReports = state.reports.filter((row) => row.student_role === 'approved_user').length,
-      roleOptions = [...new Set(state.reports.map((row) => row.student_role || 'unmarked'))],
-      classOptions = [...new Set(state.reports.map((row) => row.class_codes || 'unassigned'))],
+      roleOptions = [...new Set([
+        'student',
+        'teacher',
+        'approved_user',
+        ...state.users.map((row) => row.role || 'unmarked'),
+        ...state.reports.map((row) => row.student_role || 'unmarked'),
+      ])],
+      classOptions = [...new Set([
+        ...state.classes.map((row) => row.code),
+        ...state.users.flatMap((row) => String(row.classCodes || '').split(',').map((value) => value.trim()).filter(Boolean)),
+        ...state.reports.flatMap((row) => String(row.class_codes || '').split(',').map((value) => value.trim()).filter(Boolean)),
+        'unassigned',
+      ])],
+      roleCoverage = roleOptions.map((role) => ({
+        role,
+        accounts: state.users.filter((row) => (row.role || 'unmarked') === role).length,
+        reports: state.reports.filter((row) => (row.student_role || 'unmarked') === role).length,
+      })),
+      classCoverage = classOptions.map((classCode) => {
+        const accountRows = state.users.filter((row) => {
+            const codes = String(row.classCodes || '').split(',').map((value) => value.trim()).filter(Boolean);
+            return classCode === 'unassigned' ? codes.length === 0 : codes.includes(classCode);
+          }),
+          reportRows = state.reports.filter((row) => {
+            const codes = String(row.class_codes || '').split(',').map((value) => value.trim()).filter(Boolean);
+            return classCode === 'unassigned' ? codes.length === 0 : codes.includes(classCode);
+          });
+        return {
+          classCode,
+          accounts: accountRows.length,
+          reports: reportRows.length,
+          roles: [...new Set(accountRows.map((row) => reportRoleName[row.role] || row.role))].join('、') || '尚無帳號',
+        };
+      }),
       visibleReports = state.reports.filter((report) => {
         const email = report.student_email || studentById.get(report.student_id)?.email || '',
           role = report.student_role || 'unmarked',
@@ -592,7 +620,7 @@
       return `<section class="concept-analysis"><h4>觀念分析與下一步</h4>${analysis.wrongChoices.length ? `<p><strong>學生曾選錯：</strong>${analysis.wrongChoices.map(esc).join('、')}</p>` : ''}<p><strong>可能的學習卡點：</strong>${esc(analysis.misconception)}</p><p><strong>建議先確認：</strong>${esc(analysis.prerequisites)}</p><p><strong>建議練習單元：</strong>${esc(analysis.suggestedUnit)}</p><p><strong>建議題型：</strong>${analysis.suggestedQuestions.map(esc).join('、')}</p><small>${esc(analysis.caution)}</small></section>`;
     };
     $('#reports').innerHTML =
-      `<div class="item-head"><div><h2>${isDeveloper() ? '全體使用者完整檢測報告' : '我的班級測驗報告'}</h2><p>已收到 ${state.reports.length} 份報告。${isDeveloper() ? `所有角色及未分班報告都會顯示，報告不會因尚未分班而隱藏；其中未分班 ${unassignedReports} 份、一般核准使用者 ${approvedUserReports} 份。可依角色、分班或信箱歸類，並前往帳號管理修正資料。` : ''}展開報告即可逐題查看題目、選項、點選順序、答對／答錯、提示、原因與作答時間。</p></div><button id="refreshReports" type="button">重新整理報告</button></div>${isDeveloper() ? `<div class="report-filters" aria-label="報告歸類篩選"><label>搜尋信箱或識別碼<input id="reportSearch" value="${esc(reportView.search)}" placeholder="輸入關鍵字"></label><label>角色<select id="reportRole"><option value="all">全部角色</option>${roleOptions.map((value) => `<option value="${esc(value)}" ${reportView.role === value ? 'selected' : ''}>${esc(reportRoleName[value] || (value === 'unmarked' ? '未標示角色' : value))}</option>`).join('')}</select></label><label>分班<select id="reportClass"><option value="all">全部班級</option>${classOptions.map((value) => `<option value="${esc(value)}" ${reportView.classCode === value ? 'selected' : ''}>${esc(value === 'unassigned' ? '未分班' : value)}</option>`).join('')}</select></label><div class="filter-result"><strong>${visibleReports.length}</strong><span>份符合條件</span></div></div>` : ''}${isDeveloper() && waiting.length ? `<details class="item"><summary>${waiting.length} 位使用者尚無報告</summary><p>以下帳號尚無已完成並成功上傳的測驗報告：</p><ul>${waiting.map((row) => `<li>${esc(row.email)}｜${esc(reportRoleName[row.role] || row.role)}${row.classCodes ? `｜${esc(row.classCodes)} 班` : '｜未分班'}</li>`).join('')}</ul></details>` : ''}${
+      `<div class="item-head"><div><h2>${isDeveloper() ? '全體使用者完整檢測報告' : '我的班級測驗報告'}</h2><p>已收到 ${state.reports.length} 份報告。${isDeveloper() ? `所有角色及未分班報告都會顯示，報告不會因尚未分班而隱藏；其中未分班 ${unassignedReports} 份、一般核准使用者 ${approvedUserReports} 份。沒有完成測驗或尚未成功上傳者，也會在涵蓋狀態中標示「尚無報告」。` : ''}展開報告即可逐題查看題目、選項、點選順序、答對／答錯、提示、原因與作答時間。</p></div><button id="refreshReports" type="button">重新整理報告</button></div>${isDeveloper() ? `<div class="report-filters" aria-label="報告歸類篩選"><label>搜尋信箱或識別碼<input id="reportSearch" value="${esc(reportView.search)}" placeholder="輸入關鍵字"></label><label>角色<select id="reportRole"><option value="all">全部角色</option>${roleOptions.map((value) => `<option value="${esc(value)}" ${reportView.role === value ? 'selected' : ''}>${esc(reportRoleName[value] || (value === 'unmarked' ? '未標示角色' : value))}</option>`).join('')}</select></label><label>分班<select id="reportClass"><option value="all">全部班級</option>${classOptions.map((value) => `<option value="${esc(value)}" ${reportView.classCode === value ? 'selected' : ''}>${esc(value === 'unassigned' ? '未分班' : value)}</option>`).join('')}</select></label><div class="filter-result"><strong>${visibleReports.length}</strong><span>份符合條件</span></div></div><details class="analysis-block coverage-block" open><summary>所有角色與班級的報告涵蓋狀態</summary><div class="coverage-tables"><table><caption>角色涵蓋</caption><tr><th>角色</th><th>帳號數</th><th>報告數</th><th>狀態</th></tr>${roleCoverage.map((row) => `<tr><td>${esc(reportRoleName[row.role] || (row.role === 'unmarked' ? '未標示角色' : row.role))}</td><td>${row.accounts}</td><td>${row.reports}</td><td>${row.reports ? '已有報告' : '尚無報告'}</td></tr>`).join('')}</table><table><caption>班級涵蓋</caption><tr><th>班級</th><th>帳號數</th><th>報告數</th><th>角色／狀態</th></tr>${classCoverage.map((row) => `<tr><td>${esc(row.classCode === 'unassigned' ? '未分班' : row.classCode)}</td><td>${row.accounts}</td><td>${row.reports}</td><td>${esc(row.roles)}｜${row.reports ? '已有報告' : '尚無報告'}</td></tr>`).join('')}</table></div></details>` : ''}${isDeveloper() && waiting.length ? `<details class="item"><summary>${waiting.length} 位使用者尚無報告</summary><p>以下帳號尚無已完成並成功上傳的測驗報告：</p><ul>${waiting.map((row) => `<li>${esc(row.email)}｜${esc(reportRoleName[row.role] || row.role)}${row.classCodes ? `｜${esc(row.classCodes)} 班` : '｜未分班'}</li>`).join('')}</ul></details>` : ''}${
         visibleReports
           .map((report) => {
             const student = studentById.get(report.student_id),
@@ -614,7 +642,7 @@
                 '',
               )}</table>${(report.attempts || []).map((attempt, index) => attemptDetails(attempt, index) + conceptDetails(attempt)).join('')}</details></article>`;
           })
-          .join('') || '<p>目前沒有報告。</p>'
+          .join('') || `<p>目前篩選的「${esc(reportView.role === 'all' ? '全部角色' : reportRoleName[reportView.role] || reportView.role)}／${esc(reportView.classCode === 'all' ? '全部班級' : reportView.classCode === 'unassigned' ? '未分班' : reportView.classCode)}」尚無已完成並成功上傳的報告。</p>`
       }`;
     $('#refreshReports').onclick = refresh;
     if (isDeveloper()) {
