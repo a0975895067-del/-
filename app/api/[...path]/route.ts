@@ -245,10 +245,11 @@ async function requireCsrf(request: Request, session: Row) {
 }
 
 async function makeApplication(row: Row, data: Row, emailVerified = true, pendingCredential: Row | null = null) {
-  const identity = textValue(data.identity, 80), workplace = textValue(data.workplace, 120, false), jobTitle = textValue(data.jobTitle, 120, false);
+  const identity = textValue(data.identity, 80), workplace = textValue(data.workplace, 120, false);
+  if (!['學生', '教師'].includes(identity)) throw new ApiError('申請身分只能選擇學生或教師。');
   const id = uuid();
   await cf().DB.prepare("INSERT INTO access_applications(id,email_lookup,email_cipher,identity_cipher,workplace_cipher,job_title_cipher,email_verified,pending_password_salt,pending_password_digest,status,requested_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?)")
-    .bind(id, row.email_lookup, row.email_cipher, await seal(identity), await seal(workplace), await seal(jobTitle), emailVerified ? 1 : 0, pendingCredential?.salt || null, pendingCredential?.digest || null, now()).run();
+    .bind(id, row.email_lookup, row.email_cipher, await seal(identity), await seal(workplace), await seal(''), emailVerified ? 1 : 0, pendingCredential?.salt || null, pendingCredential?.digest || null, now()).run();
   return { id, status: 'pending' };
 }
 
@@ -488,7 +489,7 @@ async function handle(request: Request) {
       const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const userId = decodeURIComponent(userAccount[1]), data = await body(request);
       const target = await cf().DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<Row>(); if (!target) throw new ApiError('找不到此帳號。', 404);
       if (target.id === session.user_id || target.role === 'developer') throw new ApiError('開發者帳號不能在此修改。', 403);
-      const role: Role = data.role === 'student' ? 'student' : data.role === 'teacher' ? 'teacher' : data.role === 'approved_user' ? 'approved_user' : (() => { throw new ApiError('角色設定不正確。'); })();
+      const role: Role = data.role === 'student' ? 'student' : data.role === 'teacher' ? 'teacher' : (() => { throw new ApiError('角色只能設定為學生或教師。'); })();
       const email = normalizeEmail(textValue(data.email, 254)); if (!/^\S+@\S+\.\S+$/.test(email)) throw new ApiError('請輸入有效的電子郵件。');
       if (email === normalizeEmail(cf().DEVELOPER_EMAIL)) throw new ApiError('此信箱保留給開發者帳號。', 403);
       const lookup = await emailLookup(email), duplicate = await cf().DB.prepare('SELECT id FROM users WHERE email_lookup=? AND id<>?').bind(lookup, target.id).first<Row>(); if (duplicate) throw new ApiError('此信箱已由其他帳號使用。', 409);
@@ -588,7 +589,20 @@ async function handle(request: Request) {
       const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const id = decodeURIComponent(review[1]), action = review[2], data = await body(request);
       const application = await cf().DB.prepare("SELECT * FROM access_applications WHERE id=? AND status='pending'").bind(id).first<Row>(); if (!application) throw new ApiError('找不到待審申請。', 404);
       if (action === 'reject') await cf().DB.prepare("UPDATE access_applications SET status='rejected',pending_password_salt=NULL,pending_password_digest=NULL,reviewed_at=?,reviewed_by=? WHERE id=?").bind(now(), session.user_id, id).run();
-      else { const role: Role = data.role === 'teacher' ? 'teacher' : data.role === 'student' ? 'student' : 'approved_user'; if (!application.pending_password_salt || !application.pending_password_digest) throw new ApiError('這筆舊申請尚未設定密碼，請申請者重新送出申請。', 409); const timestamp = now(), email = await unseal(application.email_cipher); let user: Row | null = null; if (role === 'student') { if (!studentProfile(email)) throw new ApiError('學生帳號必須使用符合規則的龍門國中學生信箱。'); user = await ensureStudent(email); } else { user = await cf().DB.prepare('SELECT * FROM users WHERE email_lookup=?').bind(application.email_lookup).first<Row>(); if (!user) { const userId = uuid(); await cf().DB.prepare("INSERT INTO users(id,email_lookup,email_cipher,role,status,created_at,updated_at) VALUES(?,?,?,?,'active',?,?)").bind(userId, application.email_lookup, application.email_cipher, role, timestamp, timestamp).run(); user = await cf().DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<Row>(); } else await cf().DB.prepare("UPDATE users SET role=?,status='active',updated_at=? WHERE id=?").bind(role, timestamp, user.id).run(); } await cf().DB.batch([cf().DB.prepare('INSERT INTO credentials(user_id,password_salt,password_digest,failed_attempts,created_at,updated_at) VALUES(?,?,?,0,?,?) ON CONFLICT(user_id) DO UPDATE SET password_salt=excluded.password_salt,password_digest=excluded.password_digest,failed_attempts=0,locked_until=NULL,updated_at=excluded.updated_at').bind(user!.id, application.pending_password_salt, application.pending_password_digest, timestamp, timestamp),cf().DB.prepare("UPDATE access_applications SET status='approved',approved_role=?,pending_password_salt=NULL,pending_password_digest=NULL,reviewed_at=?,reviewed_by=? WHERE id=?").bind(role, timestamp, session.user_id, id)]); }
+      else {
+        if (!application.pending_password_salt || !application.pending_password_digest) throw new ApiError('這筆舊申請尚未設定密碼，請申請者重新送出申請。', 409);
+        const requestedIdentity = await unseal(application.identity_cipher), role: Role = requestedIdentity === '學生' ? 'student' : requestedIdentity === '教師' ? 'teacher' : (() => { throw new ApiError('這筆舊申請不是學生或教師，請申請者重新送出申請。', 409); })();
+        const timestamp = now(), email = await unseal(application.email_cipher), profile = studentProfile(email); let user = await cf().DB.prepare('SELECT * FROM users WHERE email_lookup=?').bind(application.email_lookup).first<Row>();
+        const classId = role === 'student' ? textValue(data.classId, 80) : '', targetClass = classId ? await cf().DB.prepare('SELECT id,grade,class_number FROM classes WHERE id=?').bind(classId).first<Row>() : null;
+        if (role === 'student' && !targetClass) throw new ApiError('核准學生前請先選擇班級。');
+        if (profile && targetClass && Number(profile.grade) !== Number(targetClass.grade)) throw new ApiError('學生信箱年級與所選班級不相符。');
+        if (!user) { const userId = uuid(); await cf().DB.prepare("INSERT INTO users(id,email_lookup,email_cipher,role,status,grade,class_number,seat_number,created_at,updated_at) VALUES(?,?,?,?,'active',?,?,?,?,?)").bind(userId, application.email_lookup, application.email_cipher, role, targetClass?.grade || null, targetClass?.class_number || null, profile?.seatNumber || null, timestamp, timestamp).run(); user = await cf().DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first<Row>(); }
+        else await cf().DB.prepare("UPDATE users SET role=?,status='active',grade=?,class_number=?,seat_number=?,updated_at=? WHERE id=?").bind(role, targetClass?.grade || null, targetClass?.class_number || null, role === 'student' ? profile?.seatNumber || user.seat_number || null : null, timestamp, user.id).run();
+        const statements = [cf().DB.prepare('INSERT INTO credentials(user_id,password_salt,password_digest,failed_attempts,created_at,updated_at) VALUES(?,?,?,0,?,?) ON CONFLICT(user_id) DO UPDATE SET password_salt=excluded.password_salt,password_digest=excluded.password_digest,failed_attempts=0,locked_until=NULL,updated_at=excluded.updated_at').bind(user!.id, application.pending_password_salt, application.pending_password_digest, timestamp, timestamp),cf().DB.prepare("UPDATE access_applications SET status='approved',approved_role=?,pending_password_salt=NULL,pending_password_digest=NULL,reviewed_at=?,reviewed_by=? WHERE id=?").bind(role, timestamp, session.user_id, id)];
+        if (role === 'student') { statements.push(cf().DB.prepare('UPDATE classes SET teacher_id=NULL WHERE teacher_id=?').bind(user!.id)); statements.push(cf().DB.prepare('DELETE FROM class_students WHERE student_id=?').bind(user!.id)); statements.push(cf().DB.prepare('INSERT INTO class_students(class_id,student_id,joined_at) VALUES(?,?,?)').bind(targetClass!.id, user!.id, timestamp)); }
+        else statements.push(cf().DB.prepare('DELETE FROM class_students WHERE student_id=?').bind(user!.id));
+        await cf().DB.batch(statements);
+      }
       await audit(session.user_id, `application.${action}`, 'application', id); return json({ ok: true });
     }
 

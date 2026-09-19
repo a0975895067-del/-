@@ -12,7 +12,7 @@
     const note = document.querySelector('#authGate .source-note');
     if (note)
       note.textContent =
-        '龍門國中學生使用學校信箱驗證；請至信箱收取驗證碼。其他申請者須先完成信箱驗證並由開發者核准。';
+        '龍門國中學生可使用學校信箱驗證；其他學生或教師可提出帳號申請，由開發者核准與分班。';
   };
   updateLoginCopy();
   const studentProfile = (email) => {
@@ -106,7 +106,6 @@
   const applicationData = () => ({
     identity: $('#requestIdentity')?.value || '',
     workplace: $('#requestWorkplace')?.value.trim() || '',
-    jobTitle: $('#requestJobTitle')?.value.trim() || '',
   });
   function ensurePrivacy() {
     if (!$('#privacyConsent')?.checked)
@@ -122,7 +121,7 @@
     if (!sendAnchor || !verifyAnchor) return false;
     const wrap = document.createElement('div');
     wrap.innerHTML =
-      '<button id="educationLogin" type="button" class="primary education-login hidden">使用教育雲端帳號驗證</button><p id="educationStatus" class="source-note hidden">教育雲端登入後，驗證碼只會寄到官方帳號提供的信箱。</p><div class="auth-divider"><span>或使用電子郵件驗證</span></div><label class="teacher-request"><input id="teacherRequest" type="checkbox"> 我不是龍門國中學生，需要申請網站使用權限</label><div id="accessRequestFields" class="request-fields hidden"><label class="auth-label">身分<select id="requestIdentity"><option value="">請選擇</option><option>龍門國中教師</option><option>其他學校教師</option><option>教育工作者</option><option>研究人員</option><option>其他</option></select></label><label class="auth-label">任職單位<input id="requestWorkplace" maxlength="120"></label><label class="auth-label">工作職稱<input id="requestJobTitle" maxlength="120"></label></div>';
+      '<button id="educationLogin" type="button" class="primary education-login hidden">使用教育雲端帳號驗證</button><p id="educationStatus" class="source-note hidden">教育雲端登入後，驗證碼只會寄到官方帳號提供的信箱。</p><div class="auth-divider"><span>或使用電子郵件驗證</span></div><label class="teacher-request"><input id="teacherRequest" type="checkbox"> 我要申請學生或教師帳號</label><div id="accessRequestFields" class="request-fields hidden"><label class="auth-label">申請身分<select id="requestIdentity"><option value="學生">學生</option><option value="教師">教師</option></select></label><label class="auth-label">學校或學習單位（選填）<input id="requestWorkplace" maxlength="120"></label></div>';
     sendAnchor.insertAdjacentElement('beforebegin', wrap);
     const teacherRequest = $('#teacherRequest'),
       educationLogin = $('#educationLogin');
@@ -178,7 +177,7 @@
     }
     message(
       educationMode === 'application'
-        ? '教育雲端身分尚未對應教師或學生，請輸入信件驗證碼並補充申請資料。'
+        ? '教育雲端身分尚未對應帳號，請輸入信件驗證碼並選擇學生或教師身分。'
         : '教育雲端身分已確認，請輸入寄到官方信箱的驗證碼。',
       true,
     );

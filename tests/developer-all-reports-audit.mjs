@@ -24,7 +24,7 @@ for (let round = 1; round <= 3; round++) {
   assert.match(dashboard, /舊版未連結報告/);
   assert.match(dashboard, /已核准但尚未建立登入帳號/);
   assert.match(html, /id="legacy"/);
-  assert.match(html, /secure-dashboard\.js\?v=20260920-legacy-unassigned/);
+  assert.match(html, /secure-dashboard\.js\?v=20260920-student-teacher-roles/);
   console.log(`第 ${round} 輪：全角色、全班級、未分班、完整內容、歸類分析與資料修改入口均存在。`);
 }
 

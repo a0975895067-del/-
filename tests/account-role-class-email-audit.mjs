@@ -22,6 +22,6 @@ assert.match(dashboard, /name="role"/, '後台缺少角色選擇');
 assert.match(dashboard, /name="classId"/, '後台缺少分班選擇');
 assert.match(dashboard, /未分班/, '後台必須清楚顯示未分班狀態');
 assert.match(dashboard, /報告不會因尚未分班而隱藏/, '後台必須說明未分班報告仍可查看');
-assert.match(html, /secure-dashboard\.js\?v=20260920-legacy-unassigned/, '後台快取版本未更新');
+assert.match(html, /secure-dashboard\.js\?v=20260920-student-teacher-roles/, '後台快取版本未更新');
 
 console.log('帳號管理稽核完成：角色、分班、未分班報告與信箱更正均具開發者後端權限保護。');

@@ -135,15 +135,15 @@
   }
   function applications() {
     if (!isDeveloper()) return;
+    const classOptions = state.classes
+      .map((cls) => `<option value="${esc(cls.id)}">${esc(cls.code)} 班（${cls.grade}年級）</option>`)
+      .join('');
     $('#applications').innerHTML =
-      `<h2>網站使用權限申請</h2><p>申請狀態為「待開發者核可」。開發者核准後，申請者可直接使用申請時設定的信箱與密碼登入，不需要驗證碼或第一次啟用碼。舊核准帳號若顯示「需補設密碼」，請申請者用原信箱重新送出補設密碼申請。</p>${
+      `<h2>學生／教師帳號申請</h2><p>申請者只能選擇學生或教師。核准學生前必須選擇班級；教師核准後，可到「班級與教師」指派任教班級。核准後可直接使用申請信箱與密碼登入。</p>${
         state.applications.length
           ? state.applications
               .map((row) => {
-                const lmStudent =
-                  /^s(113|114|115)(0[1-9]|1\d|20)(0[1-9]|[12]\d|3\d|40)@lmjh\.tp\.edu\.tw$/i.test(
-                    row.email,
-                  ) && row.identity === '學生';
+                const requestedRole = row.identity === '學生' ? 'student' : row.identity === '教師' ? 'teacher' : 'legacy';
                 const readiness =
                   row.status === 'approved'
                     ? row.accountReady
@@ -152,7 +152,7 @@
                     : row.hasPendingPassword
                       ? '已安全設定密碼'
                       : '缺少密碼';
-                return `<article class="item"><div class="item-head"><div><h3>${esc(row.email)}</h3><p>身分：${esc(row.identity)}<br>單位：${esc(row.workplace)}<br>申請說明：${esc(row.job_title)}</p><small>${esc(new Date(row.requested_at).toLocaleString())}</small></div><span class="badge">${row.status === 'pending' ? '待開發者核可' : esc(row.status)}｜${readiness}</span></div>${row.status === 'pending' ? `<div class="button-row"><button class="approve" data-review="${esc(row.id)}" data-role="${lmStudent ? 'student' : 'approved_user'}">${lmStudent ? '核准學生帳號' : '核准一般申請'}</button><button class="approve" data-review="${esc(row.id)}" data-role="teacher">核准教師</button><button class="danger" data-reject="${esc(row.id)}">拒絕</button></div>` : ''}</article>`;
+                return `<article class="item"><div class="item-head"><div><h3>${esc(row.email)}</h3><p>申請身分：${esc(row.identity)}${row.workplace ? `<br>學校或學習單位：${esc(row.workplace)}` : ''}</p><small>${esc(new Date(row.requested_at).toLocaleString())}</small></div><span class="badge">${row.status === 'pending' ? '待開發者核可' : esc(row.status)}｜${readiness}</span></div>${row.status === 'pending' && requestedRole === 'student' ? `<div class="form-grid"><label>核准後分班<select data-application-class="${esc(row.id)}"><option value="">請選擇班級</option>${classOptions}</select></label><div class="button-row"><button class="approve" data-review="${esc(row.id)}" data-role="student">核准學生並分班</button><button class="danger" data-reject="${esc(row.id)}">拒絕</button></div></div>` : row.status === 'pending' && requestedRole === 'teacher' ? `<div class="button-row"><button class="approve" data-review="${esc(row.id)}" data-role="teacher">核准教師帳號</button><button class="danger" data-reject="${esc(row.id)}">拒絕</button></div>` : row.status === 'pending' ? `<p class="legacy-note">這是舊版其他身分申請，不能直接核准；請申請者重新選擇學生或教師送出申請。</p><div class="button-row"><button class="danger" data-reject="${esc(row.id)}">拒絕舊申請</button></div>` : ''}</article>`;
               })
               .join('')
           : '<p>目前沒有申請。</p>'
@@ -161,22 +161,25 @@
       .querySelectorAll('[data-review]')
       .forEach(
         (button) =>
-          (button.onclick = () =>
-            review(button.dataset.review, 'approve', button.dataset.role)),
+          (button.onclick = () => {
+            const classId = document.querySelector(`[data-application-class="${CSS.escape(button.dataset.review)}"]`)?.value || '';
+            if (button.dataset.role === 'student' && !classId) return alert('核准學生前請先選擇班級。');
+            review(button.dataset.review, 'approve', button.dataset.role, classId);
+          }),
       );
     document
       .querySelectorAll('[data-reject]')
       .forEach(
         (button) =>
           (button.onclick = () =>
-            review(button.dataset.reject, 'reject', 'approved_user')),
+            review(button.dataset.reject, 'reject', 'student', '')),
       );
   }
-  async function review(id, action, role) {
+  async function review(id, action, role, classId = '') {
     try {
       await api(`/api/applications/${encodeURIComponent(id)}/${action}`, {
         method: 'POST',
-        body: JSON.stringify({ role }),
+        body: JSON.stringify({ role, classId }),
       });
       await refresh();
     } catch (error) {
@@ -188,10 +191,10 @@
     const roleName = {
       student: '學生',
       teacher: '教師',
-      approved_user: '一般核准使用者',
+      approved_user: '舊版核准使用者（待轉換）',
     }, classOptions = (row) => `<option value="">未分班</option>${state.classes.map((cls) => `<option value="${esc(cls.id)}" ${String(row.classIds || '').split(',').includes(String(cls.id)) ? 'selected' : ''}>${esc(cls.code)} 班（${cls.grade}年級）</option>`).join('')}`;
     $('#accounts').innerHTML =
-      `<h2>帳號、角色與分班管理</h2><p>只有開發者可更正信箱、變更角色與分班。儲存後該使用者會登出，必須以更正後的信箱重新登入；既有測驗報告會保留在同一帳號下。</p>${state.users.map((row) => `<article class="item"><div class="item-head"><div><h3>${esc(row.email)}</h3><p>目前角色：${esc(roleName[row.role] || row.role)}｜班級：${esc(row.classCodes || '未分班')}｜狀態：${esc(row.status)}</p></div></div><form class="form-grid account-editor" data-account-editor="${esc(row.id)}"><label>更正電子郵件<input name="email" type="email" maxlength="254" required value="${esc(row.email)}"></label><label>角色<select name="role"><option value="student" ${row.role === 'student' ? 'selected' : ''}>學生</option><option value="teacher" ${row.role === 'teacher' ? 'selected' : ''}>教師</option><option value="approved_user" ${row.role === 'approved_user' ? 'selected' : ''}>一般核准使用者</option></select></label><label>學生分班<select name="classId" ${row.role === 'student' ? '' : 'disabled'}>${classOptions(row)}</select></label><div class="button-row"><button class="primary" type="submit">儲存信箱、角色與分班</button><button class="danger" type="button" data-delete-account="${esc(row.id)}" data-account-email="${esc(row.email)}">永久刪除帳號</button></div></form></article>`).join('') || '<p>目前沒有可管理的學生、教師或一般使用者帳號。</p>'}`;
+      `<h2>帳號、角色與分班管理</h2><p>角色只分為學生與教師。學生可保留或調整班級；教師的任教班級請到「班級與教師」設定。舊版核准使用者資料與報告會保留，但下次儲存時必須轉換為學生或教師。</p>${state.users.map((row) => `<article class="item"><div class="item-head"><div><h3>${esc(row.email)}</h3><p>目前角色：${esc(roleName[row.role] || row.role)}｜班級：${esc(row.classCodes || '未分班')}｜狀態：${esc(row.status)}</p></div></div><form class="form-grid account-editor" data-account-editor="${esc(row.id)}"><label>更正電子郵件<input name="email" type="email" maxlength="254" required value="${esc(row.email)}"></label><label>角色<select name="role">${row.role === 'approved_user' ? '<option value="" selected disabled>請選擇學生或教師</option>' : ''}<option value="student" ${row.role === 'student' ? 'selected' : ''}>學生</option><option value="teacher" ${row.role === 'teacher' ? 'selected' : ''}>教師</option></select></label><label>學生分班<select name="classId" ${row.role === 'student' ? '' : 'disabled'}>${classOptions(row)}</select></label><div class="button-row"><button class="primary" type="submit">儲存信箱、角色與分班</button><button class="danger" type="button" data-delete-account="${esc(row.id)}" data-account-email="${esc(row.email)}">永久刪除帳號</button></div></form></article>`).join('') || '<p>目前沒有可管理的學生或教師帳號。</p>'}`;
     document.querySelectorAll('[data-account-editor]').forEach((form) => {
       const role = form.elements.role, classField = form.elements.classId;
       role.onchange = () => { classField.disabled = role.value !== 'student'; };
