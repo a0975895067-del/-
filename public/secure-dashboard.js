@@ -23,6 +23,11 @@
       teachers: [],
       users: [],
       students: {},
+      legacyData: {
+        unassignedUsers: [],
+        orphanedReports: [],
+        approvedApplicationsWithoutAccount: [],
+      },
     };
   const base = () => String(window.MATH_API_BASE || '').replace(/\/$/, '');
   async function api(path, options = {}) {
@@ -58,10 +63,12 @@
         api('/api/applications'),
         api('/api/teachers'),
         api('/api/users'),
+        api('/api/admin/legacy-data'),
       ]);
       state.applications = extra[0].applications;
       state.teachers = extra[1].teachers;
       state.users = extra[2].users;
+      state.legacyData = extra[3];
     }
     state.students = {};
     await Promise.all(
@@ -83,6 +90,7 @@
         ? [
             ['applications', '使用申請'],
             ['accounts', '帳號管理'],
+            ['legacy', '未分班／舊資料'],
           ]
         : []),
       ['classes', isDeveloper() ? '班級與教師' : '我的班級'],
@@ -220,6 +228,33 @@
           }
         }),
     );
+  }
+  function legacyData() {
+    if (!isDeveloper()) return;
+    const roleName = {
+        student: '學生',
+        teacher: '教師',
+        approved_user: '一般核准使用者',
+        legacy_unassigned: '舊版未連結資料',
+      },
+      unassigned = state.legacyData.unassignedUsers || [],
+      orphaned = state.legacyData.orphanedReports || [],
+      applications = state.legacyData.approvedApplicationsWithoutAccount || [];
+    $('#legacy').innerHTML = `<div class="item-head"><div><h2>未分班與舊資料檢查</h2><p>此區只供開發者查看。資料分成三類，避免未分班、角色異常或舊帳號連結遺失時被後台隱藏。這裡不會自動合併或刪除資料。</p></div><button id="refreshLegacy" type="button">重新整理</button></div>
+      <div class="grid legacy-metrics"><div class="metric"><span>未分班／未指派帳號</span><strong>${unassigned.length}</strong></div><div class="metric"><span>舊版未連結報告</span><strong>${orphaned.length}</strong></div><div class="metric"><span>核准後未建帳號</span><strong>${applications.length}</strong></div></div>
+      <details class="analysis-block" open><summary>未分班或未指派的現有帳號</summary><p class="analysis-note">學生沒有班級、教師沒有任教班級，以及一般核准使用者都列在此處；既有報告數也會一併顯示。</p><table><tr><th>信箱</th><th>角色</th><th>狀態</th><th>年級</th><th>報告數</th><th>處理</th></tr>${unassigned.map((row) => `<tr><td>${esc(row.email)}</td><td>${esc(roleName[row.role] || row.role)}</td><td>${esc(row.status)}</td><td>${esc(row.grade || '—')}</td><td>${Number(row.reportCount || 0)}</td><td><button type="button" data-legacy-account="${esc(row.id)}">前往帳號管理</button></td></tr>`).join('') || '<tr><td colspan="6">目前沒有未分班或未指派帳號。</td></tr>'}</table></details>
+      <details class="analysis-block" open><summary>舊版未連結報告</summary><p class="analysis-note">這些報告仍在資料庫，但原帳號資料已不存在。報告內容可在「個別報告」以「舊版未連結資料」查看；請勿直接猜測學生身分。</p><table><tr><th>報告識別碼</th><th>舊學生識別碼</th><th>年級</th><th>總題數</th><th>首次答對</th><th>建立時間</th></tr>${orphaned.map((row) => `<tr><td>${esc(row.id)}</td><td>${esc(row.student_id)}</td><td>${esc(row.grade)}</td><td>${Number(row.total_questions || 0)}</td><td>${Number(row.first_correct || 0)}</td><td>${esc(new Date(row.created_at).toLocaleString())}</td></tr>`).join('') || '<tr><td colspan="6">目前沒有失去帳號連結的舊報告。</td></tr>'}</table></details>
+      <details class="analysis-block" open><summary>已核准但尚未建立登入帳號</summary><p class="analysis-note">這代表申請紀錄已核准，但目前找不到對應帳號；請先核對本人與申請資料，再決定是否請對方重新申請。</p><table><tr><th>申請信箱</th><th>核准角色</th><th>申請時間</th><th>核准時間</th></tr>${applications.map((row) => `<tr><td>${esc(row.email)}</td><td>${esc(roleName[row.approvedRole] || row.approvedRole)}</td><td>${esc(new Date(row.requestedAt).toLocaleString())}</td><td>${row.reviewedAt ? esc(new Date(row.reviewedAt).toLocaleString()) : '未記錄'}</td></tr>`).join('') || '<tr><td colspan="4">目前沒有核准後遺失帳號的申請。</td></tr>'}</table></details>`;
+    $('#refreshLegacy').onclick = refresh;
+    document.querySelectorAll('[data-legacy-account]').forEach((button) => {
+      button.onclick = () => {
+        document.querySelector('[data-tab="accounts"]')?.click();
+        const editor = document.querySelector(`[data-account-editor="${CSS.escape(button.dataset.legacyAccount)}"]`);
+        editor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        editor?.classList.add('account-highlight');
+        setTimeout(() => editor?.classList.remove('account-highlight'), 2200);
+      };
+    });
   }
   function classes() {
     const teacherOptions = state.teachers
@@ -546,7 +581,7 @@
     $('#refreshAnalytics').onclick = refresh;
   }
   function reports() {
-    const reportRoleName = { student: '學生', teacher: '教師', approved_user: '一般核准使用者' },
+    const reportRoleName = { student: '學生', teacher: '教師', approved_user: '一般核准使用者', legacy_unassigned: '舊版未連結資料' },
       studentById = new Map(
         Object.values(state.students)
           .flat()
@@ -561,6 +596,7 @@
         'student',
         'teacher',
         'approved_user',
+        'legacy_unassigned',
         ...state.users.map((row) => row.role || 'unmarked'),
         ...state.reports.map((row) => row.student_role || 'unmarked'),
       ])],
@@ -670,6 +706,7 @@
     overview();
     applications();
     accounts();
+    legacyData();
     classes();
     customClassCreator();
     studentMoves();

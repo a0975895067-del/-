@@ -470,6 +470,19 @@ async function handle(request: Request) {
       const rows = await cf().DB.prepare("SELECT u.*, CASE WHEN u.role='student' THEN COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=u.id),'') WHEN u.role='teacher' THEN COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM classes c WHERE c.teacher_id=u.id),'') ELSE '' END AS class_codes, CASE WHEN u.role='student' THEN COALESCE((SELECT GROUP_CONCAT(c.id, ',') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=u.id),'') ELSE '' END AS class_ids FROM users u WHERE u.role<>'developer' ORDER BY u.role,u.created_at DESC").all<Row>();
       return json({ users: await Promise.all(rows.results.map(async row => ({ ...(await publicUser(row)), status: row.status, classCodes: row.class_codes || '', classIds: row.class_ids || '' }))) });
     }
+    if (method === 'GET' && path === '/api/admin/legacy-data') {
+      await authenticate(request, ['developer']);
+      const [unassigned, orphanedReports, approvedWithoutAccount] = await Promise.all([
+        cf().DB.prepare("SELECT u.*,COALESCE((SELECT COUNT(*) FROM reports r WHERE r.student_id=u.id),0) AS report_count FROM users u WHERE u.role<>'developer' AND ((u.role='student' AND NOT EXISTS(SELECT 1 FROM class_students cs WHERE cs.student_id=u.id)) OR (u.role='teacher' AND NOT EXISTS(SELECT 1 FROM classes c WHERE c.teacher_id=u.id)) OR u.role='approved_user') ORDER BY u.role,u.created_at DESC").all<Row>(),
+        cf().DB.prepare("SELECT r.id,r.student_id,r.assignment_id,r.grade,r.total_questions,r.first_correct,r.hints_used,r.created_at,r.delete_after FROM reports r LEFT JOIN users u ON u.id=r.student_id WHERE u.id IS NULL ORDER BY r.created_at DESC LIMIT 2000").all<Row>(),
+        cf().DB.prepare("SELECT a.id,a.email_cipher,a.approved_role,a.requested_at,a.reviewed_at FROM access_applications a LEFT JOIN users u ON u.email_lookup=a.email_lookup WHERE a.status='approved' AND u.id IS NULL ORDER BY a.reviewed_at DESC LIMIT 500").all<Row>(),
+      ]);
+      return json({
+        unassignedUsers: await Promise.all(unassigned.results.map(async row => ({ ...(await publicUser(row)), status: row.status, reportCount: Number(row.report_count || 0), createdAt: row.created_at }))),
+        orphanedReports: orphanedReports.results,
+        approvedApplicationsWithoutAccount: await Promise.all(approvedWithoutAccount.results.map(async row => ({ id: row.id, email: await unseal(row.email_cipher), approvedRole: row.approved_role || 'approved_user', requestedAt: row.requested_at, reviewedAt: row.reviewed_at }))),
+      });
+    }
     const userAccount = path.match(/^\/api\/users\/([^/]+)$/);
     if (method === 'PATCH' && userAccount) {
       const session = await authenticate(request, ['developer']); await requireCsrf(request, session); const userId = decodeURIComponent(userAccount[1]), data = await body(request);
@@ -629,14 +642,14 @@ async function handle(request: Request) {
     const reportId = path.match(/^\/api\/reports\/([^/]+)$/);
     if (method === 'GET' && reportId) {
       const session = await authenticate(request, ['developer', 'teacher', 'student', 'approved_user']), id = decodeURIComponent(reportId[1]); let report;
-      if (session.role === 'developer') report = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,u.role AS student_role,u.status AS student_status,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r JOIN users u ON u.id=r.student_id WHERE r.id=?").bind(id).first<Row>();
+      if (session.role === 'developer') report = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,COALESCE(u.role,'legacy_unassigned') AS student_role,COALESCE(u.status,'legacy_record') AS student_status,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r LEFT JOIN users u ON u.id=r.student_id WHERE r.id=?").bind(id).first<Row>();
       else if (session.role === 'student' || session.role === 'approved_user') report = await cf().DB.prepare('SELECT * FROM reports WHERE id=? AND student_id=?').bind(id, session.user_id).first<Row>();
       else report = await cf().DB.prepare('SELECT r.*,u.email_cipher AS student_email_cipher,c.code AS class_codes FROM reports r JOIN users u ON u.id=r.student_id JOIN class_students cs ON cs.student_id=r.student_id JOIN classes c ON c.id=cs.class_id WHERE r.id=? AND c.teacher_id=?').bind(id, session.user_id).first<Row>();
       if (!report) throw new ApiError('找不到報告或沒有權限。', 404); return json({ report: await decodeReport(report) });
     }
     if (method === 'GET' && path === '/api/reports') {
       const session = await authenticate(request, ['developer', 'teacher', 'student', 'approved_user']); let rows;
-      if (session.role === 'developer') rows = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,u.role AS student_role,u.status AS student_status,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r JOIN users u ON u.id=r.student_id ORDER BY r.created_at DESC LIMIT 2000").all<Row>();
+      if (session.role === 'developer') rows = await cf().DB.prepare("SELECT r.*,u.email_cipher AS student_email_cipher,COALESCE(u.role,'legacy_unassigned') AS student_role,COALESCE(u.status,'legacy_record') AS student_status,COALESCE((SELECT GROUP_CONCAT(c.code, ', ') FROM class_students cs JOIN classes c ON c.id=cs.class_id WHERE cs.student_id=r.student_id),'') AS class_codes FROM reports r LEFT JOIN users u ON u.id=r.student_id ORDER BY r.created_at DESC LIMIT 2000").all<Row>();
       else if (session.role === 'student' || session.role === 'approved_user') rows = await cf().DB.prepare('SELECT * FROM reports WHERE student_id=? ORDER BY created_at DESC').bind(session.user_id).all<Row>();
       else rows = await cf().DB.prepare('SELECT DISTINCT r.*,u.email_cipher AS student_email_cipher,c.code AS class_codes FROM reports r JOIN users u ON u.id=r.student_id JOIN class_students cs ON cs.student_id=r.student_id JOIN classes c ON c.id=cs.class_id WHERE c.teacher_id=? ORDER BY r.created_at DESC').bind(session.user_id).all<Row>();
       return json({ reports: await Promise.all(rows.results.map(decodeReport)) });
