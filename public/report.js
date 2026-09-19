@@ -106,8 +106,15 @@
   async function store(report) {
     window.MathLatestReport = report;
     const role = window.MathStudentAuth?.role;
-    if (!window.MathSecureApi || !['student', 'approved_user'].includes(role))
+    if (!window.MathSecureApi || !['student', 'approved_user'].includes(role)) {
+      saveStatus(
+        role === 'guest'
+          ? '本次結果尚未上傳：登入狀態已失效，請重新登入後再測一次。'
+          : '本次結果只保留在目前頁面；學生帳號登入後才能儲存至後台。',
+        'error',
+      );
       return;
+    }
     const profileGrade = Number(window.MathStudentAuth?.studentProfile?.grade),
       label = String(report.attempts?.[0]?.grade || ''),
       parsed = Number((label.match(/[789]/) || [])[0]),
@@ -226,6 +233,10 @@
       .join('');
     box.innerHTML = `<strong>進階學習診斷</strong><br>總題數：${rows.length} 題<br>首次作答正確：${first} 題<br>無提示內容掌握度：${mastery}%<br>學習狀態：${band}<br><strong>各單元：</strong><br>${unitHtml}${focusHtml ? `<br><strong>本次優先回顧：</strong><ol>${focusHtml}</ol><small>以上為依本次作答歷程產生的可能性判讀，仍需由後續題目或教師觀察確認。</small><br>` : '<br>'}<strong>整體建議：</strong>${mastery < 50 ? '回到基礎例題，先口說已知條件與第一步。' : mastery < 80 ? '重做有提示或答錯的題目，再練習中等題。' : '可進入跨單元及會考素養題，並說明每一步理由。'}`;
   }
+  document.addEventListener('math-test-finished', () => {
+    summarize();
+    buttons();
+  });
   const bytes = (value) => new TextEncoder().encode(value),
     joinBytes = (parts) => {
       const size = parts.reduce((sum, part) => sum + part.length, 0),

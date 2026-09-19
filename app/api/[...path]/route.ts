@@ -651,7 +651,9 @@ async function handle(request: Request) {
       if (![7, 8, 9].includes(grade)) throw new ApiError('報告年級格式不正確。');
       const summary = JSON.stringify(data.unitSummary || {}), attempts = JSON.stringify(data.attempts || []); if (summary.length > 50_000 || attempts.length > 150_000) throw new ApiError('報告資料量過大。', 413);
       const id = uuid(), timestamp = now(), deleteAfter = new Date(Date.now() + REPORT_DAYS * 86400_000).toISOString();
-      await cf().DB.prepare('INSERT INTO reports(id,student_id,assignment_id,grade,unit_summary_cipher,attempts_cipher,total_questions,first_correct,hints_used,created_at,delete_after) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, session.user_id, null, grade, await seal(summary), await seal(attempts), total, correct, hints, timestamp, deleteAfter).run(); return json({ id, deleteAfter }, 201);
+      await cf().DB.prepare('INSERT INTO reports(id,student_id,assignment_id,grade,unit_summary_cipher,attempts_cipher,total_questions,first_correct,hints_used,created_at,delete_after) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, session.user_id, null, grade, await seal(summary), await seal(attempts), total, correct, hints, timestamp, deleteAfter).run();
+      await audit(session.user_id, 'report.created', 'report', id, 'success', { grade, totalQuestions: total });
+      return json({ id, deleteAfter }, 201);
     }
     const reportId = path.match(/^\/api\/reports\/([^/]+)$/);
     if (method === 'GET' && reportId) {
