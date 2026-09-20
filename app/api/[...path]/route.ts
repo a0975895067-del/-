@@ -645,9 +645,9 @@ async function handle(request: Request) {
     }
 
     if (method === 'POST' && path === '/api/reports') {
-      const session = await authenticate(request, ['student', 'approved_user']); await requireCsrf(request, session); const data = await body(request), total = Number(data.totalQuestions), correct = Number(data.firstCorrect), hints = Number(data.hintsUsed || 0);
+      const session = await authenticate(request, ['student', 'teacher', 'developer', 'approved_user']); await requireCsrf(request, session); const data = await body(request), total = Number(data.totalQuestions), correct = Number(data.firstCorrect), hints = Number(data.hintsUsed || 0);
       if (!Number.isInteger(total) || total < 1 || total > 100 || !Number.isInteger(correct) || correct < 0 || correct > total || !Number.isInteger(hints) || hints < 0 || hints > total) throw new ApiError('報告數據格式不正確。');
-      const requestedGrade = Number(data.grade), grade = session.role === 'student' ? Number(session.grade) : requestedGrade;
+      const requestedGrade = Number(data.grade), accountGrade = Number(session.grade), grade = session.role === 'student' && [7, 8, 9].includes(accountGrade) ? accountGrade : requestedGrade;
       if (![7, 8, 9].includes(grade)) throw new ApiError('報告年級格式不正確。');
       const summary = JSON.stringify(data.unitSummary || {}), attempts = JSON.stringify(data.attempts || []); if (summary.length > 50_000 || attempts.length > 150_000) throw new ApiError('報告資料量過大。', 413);
       const id = uuid(), timestamp = now(), deleteAfter = new Date(Date.now() + REPORT_DAYS * 86400_000).toISOString();

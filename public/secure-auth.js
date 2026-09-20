@@ -105,7 +105,7 @@
   }
   const applicationData = () => ({
     identity: $('#requestIdentity')?.value || '',
-    workplace: $('#requestWorkplace')?.value.trim() || '',
+    workplace: '',
   });
   function ensurePrivacy() {
     if (!$('#privacyConsent')?.checked)
@@ -121,7 +121,7 @@
     if (!sendAnchor || !verifyAnchor) return false;
     const wrap = document.createElement('div');
     wrap.innerHTML =
-      '<button id="educationLogin" type="button" class="primary education-login hidden">使用教育雲端帳號驗證</button><p id="educationStatus" class="source-note hidden">教育雲端登入後，驗證碼只會寄到官方帳號提供的信箱。</p><div class="auth-divider"><span>或使用電子郵件驗證</span></div><label class="teacher-request"><input id="teacherRequest" type="checkbox"> 我要申請學生或教師帳號</label><div id="accessRequestFields" class="request-fields hidden"><label class="auth-label">申請身分<select id="requestIdentity"><option value="學生">學生</option><option value="教師">教師</option></select></label><label class="auth-label">學校或學習單位（選填）<input id="requestWorkplace" maxlength="120"></label></div>';
+      '<button id="educationLogin" type="button" class="primary education-login hidden">使用教育雲端帳號驗證</button><p id="educationStatus" class="source-note hidden">教育雲端登入後，驗證碼只會寄到官方帳號提供的信箱。</p><div class="auth-divider"><span>或使用電子郵件驗證</span></div><label class="teacher-request"><input id="teacherRequest" type="checkbox"> 我要申請學生或教師帳號</label><div id="accessRequestFields" class="request-fields hidden"><label class="auth-label">申請身分<select id="requestIdentity"><option value="學生">學生</option><option value="教師">教師</option></select></label></div>';
     sendAnchor.insertAdjacentElement('beforebegin', wrap);
     const teacherRequest = $('#teacherRequest'),
       educationLogin = $('#educationLogin');

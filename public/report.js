@@ -106,11 +106,14 @@
   async function store(report) {
     window.MathLatestReport = report;
     const role = window.MathStudentAuth?.role;
-    if (!window.MathSecureApi || !['student', 'approved_user'].includes(role)) {
+    if (
+      !window.MathSecureApi ||
+      !['student', 'teacher', 'developer', 'approved_user'].includes(role)
+    ) {
       saveStatus(
         role === 'guest'
           ? '本次結果尚未上傳：登入狀態已失效，請重新登入後再測一次。'
-          : '本次結果只保留在目前頁面；學生帳號登入後才能儲存至後台。',
+          : '本次結果只保留在目前頁面；登入有效帳號後才能儲存至後台。',
         'error',
       );
       return;
