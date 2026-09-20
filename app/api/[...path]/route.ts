@@ -153,6 +153,21 @@ async function rateLimit(bucket: string, maximum: number, windowSeconds: number)
   }
   await cf().DB.prepare('UPDATE rate_limits SET count=count+1 WHERE bucket=?').bind(bucket).run();
 }
+async function tokenBucketRateLimit(bucket: string, capacity: number, refillPerSecond: number) {
+  const current = Date.now();
+  const result = await cf().DB.prepare(`INSERT INTO rate_limits(bucket,count,reset_at) VALUES(?,?,?)
+    ON CONFLICT(bucket) DO UPDATE SET
+      count=MIN(?,rate_limits.count+MAX(0,(?-CAST(rate_limits.reset_at AS REAL))/1000.0*?))-1,
+      reset_at=CAST(? AS TEXT)
+    WHERE MIN(?,rate_limits.count+MAX(0,(?-CAST(rate_limits.reset_at AS REAL))/1000.0*?))>=1
+    RETURNING count`)
+    .bind(bucket, capacity - 1, String(current), capacity, current, refillPerSecond, String(current), capacity, current, refillPerSecond)
+    .first<Row>();
+  if (!result) {
+    const retryAfterSeconds = Math.max(1, Math.ceil(1 / refillPerSecond));
+    throw new ApiError('目前登入人數較多，系統正在分流，請稍後再試。', 429, { retryAfterSeconds }, { 'retry-after': String(retryAfterSeconds) });
+  }
+}
 async function audit(actor: string | null, action: string, targetType = '', targetId = '', outcome = 'success', metadata: unknown = {}) {
   await cf().DB.prepare('INSERT INTO audit_logs(id,actor_id,action,target_type,target_id,outcome,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?)')
     .bind(uuid(), actor, action, targetType, targetId, outcome, JSON.stringify(metadata).slice(0, 4000), now()).run();
@@ -344,7 +359,10 @@ async function handle(request: Request) {
       const session = await createSession(request, user); await audit(user.id, 'auth.developer_totp_enrolled'); return json({ user: session.user, csrfToken: session.csrfToken }, 200, { 'set-cookie': sessionCookie(session.token) });
     }
     if (method === 'POST' && path === '/api/auth/password-login') {
-      const data = await body(request), email = normalizeEmail(data.email), user = await findUser(email), isStudent = user?.role === 'student';
+      await tokenBucketRateLimit('password-login:global', 500, 500);
+      const data = await body(request), email = normalizeEmail(data.email);
+      await rateLimit(`password-login-account:${await emailLookup(email)}`, 20, 15 * 60);
+      const user = await findUser(email), isStudent = user?.role === 'student';
       if (!isStudent) await rateLimit(`password-login:${await ipDigest(request)}`, 20, 15 * 60);
       if (!user || user.status !== 'active') throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
       const credential = await cf().DB.prepare('SELECT * FROM credentials WHERE user_id=?').bind(user.id).first<Row>();
