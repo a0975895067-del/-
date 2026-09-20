@@ -14,9 +14,9 @@ assert.match(client, /重複登入錯誤[\s\S]+?\$\{minutes\} 分鐘後再登入
 
 assert.match(route, /tokenBucketRateLimit\('password-login:global', 500, 500\)/, '後端需令牌桶限制全站每秒 500 次登入');
 assert.match(route, /ON CONFLICT\(bucket\) DO UPDATE SET[\s\S]+?RETURNING count/, '令牌扣除需以單一資料庫語句原子更新');
-assert.match(route, /password-login-account:[\s\S]+?20, 15 \* 60/, '單一帳號登入需有 15 分鐘視窗限制');
+assert.match(route, /password-login-account:[\s\S]+?20, LOGIN_COOLDOWN_SECONDS/, '單一帳號登入需有 5 分鐘視窗限制');
 assert.match(route, /retry-after/, '過載回應需含 Retry-After');
-assert.match(app, /local-access\.js\?v=20260921-login-resilience/);
-assert.match(legacy, /local-access\.js\?v=20260921-login-resilience/);
+assert.match(app, /local-access\.js\?v=20260921-login-5min/);
+assert.match(legacy, /local-access\.js\?v=20260921-login-5min/);
 
 console.log('登入抗壓稽核完成：前端隨機分流、重複送出保護、後端令牌桶與帳號冷卻皆已就位。');
