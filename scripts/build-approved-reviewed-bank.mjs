@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const root = resolve('.');
 const source = JSON.parse(readFileSync(resolve(root, 'review-previews', '.questions-301-481-staging.json'), 'utf8'));
-const approved = source.questions.slice(0, 1140).map((question) => ({
+const approved = source.questions.slice(0, 1260).map((question) => ({
   id: question.id,
   sourceId: question.id,
   grade: String(question.grade),
@@ -41,8 +41,8 @@ for (const question of approved) {
 const exportData = {
   metadata: {
     title: '數學任務站已審查題庫與隨機變式規格',
-    version: '2026-09-16-reviewed-901',
-    reviewedDisplayRange: '1-901',
+    version: '2026-09-22-reviewed-1021',
+    reviewedDisplayRange: '1-1021',
     reviewedQuestionRecords: approved.length,
     variantPolicy: '每單元每難度使用已審查題目作為模板，由後端發放安全隨機種子；易3000種、中2000種、難1500種。',
     note: 'supportedVariants為可生成容量，不代表JSON內重複儲存相同題目；實際題目於測驗開始時依種子產生。',
@@ -51,7 +51,7 @@ const exportData = {
   questions: approved,
 };
 
-const output = `(() => {\n  const questions = ${JSON.stringify(approved).replace(/</g, '\\u003c')};\n  const copy = (question) => ({ ...question, o: [...question.o] });\n  window.approvedReviewedBankStats = Object.freeze({ approvedTotal: ${approved.length}, reviewRange: '1-901', finalJsonCreated: true, generationPlanCount: ${generationPlans.length} });\n  window.approvedReviewedQuestionsFor = (grade, unit, level) => questions\n    .filter((question) => question.grade === String(grade) && question.u === unit && question.l === level)\n    .map(copy);\n})();\n`;
+const output = `(() => {\n  const questions = ${JSON.stringify(approved).replace(/</g, '\\u003c')};\n  const copy = (question) => ({ ...question, o: [...question.o] });\n  window.approvedReviewedBankStats = Object.freeze({ approvedTotal: ${approved.length}, reviewRange: '1-1021', finalJsonCreated: true, generationPlanCount: ${generationPlans.length} });\n  window.approvedReviewedQuestionsFor = (grade, unit, level) => questions\n    .filter((question) => question.grade === String(grade) && question.u === unit && question.l === level)\n    .map(copy);\n})();\n`;
 
 const jsonName = '已審查題庫與隨機變式規格_20260916.json';
 writeFileSync(resolve(root, 'public', 'approved-reviewed-question-bank.js'), output, 'utf8');

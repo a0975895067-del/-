@@ -4,8 +4,8 @@ import { resolve } from 'node:path';
 
 const file=resolve('public','已審查題庫與隨機變式規格_20260916.json');
 const data=JSON.parse(readFileSync(file,'utf8'));
-assert.equal(data.metadata.reviewedDisplayRange,'1-901');
-assert.equal(data.questions.length,1140,'已審查題庫應包含1140筆來源紀錄');
+assert.equal(data.metadata.reviewedDisplayRange,'1-1021');
+assert.equal(data.questions.length,1260,'已審查題庫應包含1260筆來源紀錄');
 assert.ok(data.generationPlans.length>0,'缺少變式生成規格');
 for(const plan of data.generationPlans){
   assert.ok(plan.reviewedTemplates>=20,`${plan.key}缺少足夠的已審查模板`);
