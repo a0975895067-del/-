@@ -128,14 +128,13 @@
 
     gate.innerHTML = `
       <h2>學生／教師登入與註冊</h2>
-      <p class="source-note">登入請填寫帳號、密碼與身分；註冊只需設定一次密碼。帳號權限仍由伺服器核准的角色決定。</p>
+      <p class="source-note">登入請填寫帳號與密碼；系統會依已核准帳號自動判定身分。註冊只需設定一次密碼。</p>
       <label class="privacy-check"><input id="localPrivacy" type="checkbox"> 我已閱讀並了解 <a href="privacy.html" target="_blank" rel="noopener">個人資料蒐集、處理及利用告知事項</a>（版本 ${privacyVersion}）。</label>
       <div class="auth-account-grid">
         <section class="auth-panel" aria-labelledby="memberLoginTitle">
           <h3 id="memberLoginTitle">學生／教師登入</h3>
           <label class="auth-label">帳號（電子郵件）<input id="localEmail" type="email" autocomplete="username" maxlength="254"></label>
           <label class="auth-label">密碼<input id="localPassword" type="password" autocomplete="current-password" maxlength="200"></label>
-          <label class="auth-label">身分<select id="localIdentity"><option value="student">學生</option><option value="teacher">教師</option></select></label>
           <button id="localLogin" class="primary" type="button">立即登入</button>
         </section>
         <section class="auth-panel" aria-labelledby="applicationTitle">
@@ -173,7 +172,6 @@
         body: JSON.stringify({
           email: $(developer ? '#developerEmail' : '#localEmail').value,
           password: $(developer ? '#developerPassword' : '#localPassword').value,
-          identity: developer ? 'developer' : $('#localIdentity').value,
           otp: developer ? $('#developerOtp').value : '',
           privacyVersion: consent(),
         }),

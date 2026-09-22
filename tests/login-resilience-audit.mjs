@@ -11,9 +11,11 @@ assert.match(client, /if \(loginInFlight\) return/, '前端仍須防止重複送
 assert.match(client, /csrfToken = result\.csrfToken;[\s\S]+?unlock\(result\.user\)/, '登入成功須直接更新畫面');
 assert.match(client, /const result = await api\('\/api\/me'\)/, '重新開啟頁面時須恢復有效工作階段');
 assert.match(route, /tokenBucketRateLimit\('password-login:global', 500, 500\)/, '後端仍須保留單秒全站抗壓保護');
-assert.match(route, /requestedIdentity === 'developer'[\s\S]+?requestedIdentity === 'teacher'[\s\S]+?requestedIdentity === 'student'/, '後端須核對登入身分');
+assert.doesNotMatch(client, /id="localIdentity"/, '登入畫面不得要求學生或教師自行選擇身分');
+assert.doesNotMatch(route, /const requestedIdentity = String\(data\.identity \|\| ''\)|identityMatches/, '登入身分須由伺服器帳號資料自動判定');
+assert.match(route, /if \(user\.role === 'developer'\)/, '開發者仍須由伺服器角色強制驗證動態碼');
 for (const html of [app, legacy]) {
-  assert.match(html, /local-access\.js\?v=20260922-login-unified/);
+  assert.match(html, /local-access\.js\?v=20260922-login-auto-role/);
   assert.doesNotMatch(html, /secure-auth\.js/, '頁面只能載入一套登入控制器');
 }
 

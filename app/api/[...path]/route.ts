@@ -364,13 +364,6 @@ async function handle(request: Request) {
       const data = await body(request), email = normalizeEmail(data.email);
       const user = await findUser(email);
       if (!user || user.status !== 'active') throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
-      const requestedIdentity = String(data.identity || '');
-      const identityMatches = requestedIdentity === 'developer'
-        ? user.role === 'developer'
-        : requestedIdentity === 'teacher'
-          ? user.role === 'teacher'
-          : requestedIdentity === 'student' && ['student', 'approved_user'].includes(user.role);
-      if (!identityMatches) throw new ApiError('帳號、密碼或身分不正確。', 401);
       const credential = await cf().DB.prepare('SELECT * FROM credentials WHERE user_id=?').bind(user.id).first<Row>();
       if (!credential) throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
       const matches = await safeEqual(credential.password_digest, await passwordDigest(String(data.password || ''), credential.password_salt));
