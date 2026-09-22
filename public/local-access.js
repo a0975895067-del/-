@@ -132,18 +132,18 @@
       <label class="privacy-check"><input id="localPrivacy" type="checkbox"> 我已閱讀並了解 <a href="privacy.html" target="_blank" rel="noopener">個人資料蒐集、處理及利用告知事項</a>（版本 ${privacyVersion}）。</label>
       <div class="auth-account-grid">
         <section class="auth-panel" aria-labelledby="memberLoginTitle">
-          <h3 id="memberLoginTitle">學生／教師登入</h3>
+          <h3 id="memberLoginTitle">學生／教師登入 <span class="login-registration-note">尚未註冊請先註冊</span></h3>
           <label class="auth-label">帳號（電子郵件）<input id="localEmail" type="email" autocomplete="username" maxlength="254"></label>
           <label class="auth-label">密碼<input id="localPassword" type="password" autocomplete="current-password" maxlength="200"></label>
           <button id="localLogin" class="primary" type="button">立即登入</button>
         </section>
-        <section class="auth-panel" aria-labelledby="applicationTitle">
-          <h3 id="applicationTitle">學生／教師註冊申請</h3>
+        <details class="auth-panel auth-registration" aria-labelledby="applicationTitle">
+          <summary id="applicationTitle">學生／教師註冊申請</summary>
           <label class="auth-label">申請帳號（電子郵件）<input id="applicationEmail" type="email" autocomplete="username" maxlength="254"></label>
           <label class="auth-label">設定密碼（至少 12 個字元）<input id="applicationPassword" type="password" autocomplete="new-password" maxlength="200"></label>
           <label class="auth-label">申請身分<select id="applicationIdentity"><option value="學生">學生</option><option value="教師">教師</option></select></label>
           <button id="submitApplication" class="primary" type="button">送出註冊申請</button>
-        </section>
+        </details>
       </div>
       ${studentEmailAccess}
       <details class="developer-login">
