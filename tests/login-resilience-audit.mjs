@@ -6,17 +6,15 @@ const client = fs.readFileSync(new URL('../public/local-access.js', import.meta.
 const app = fs.readFileSync(new URL('../public/app.html', import.meta.url), 'utf8');
 const legacy = fs.readFileSync(new URL('../public/數學任務站.html', import.meta.url), 'utf8');
 
-assert.match(client, /randomizedLoginDelay=.*1000\+.*%4001/, '前端登入需隨機延遲 1～5 秒');
-assert.match(client, /loginInFlight[\s\S]+?button\.disabled=true[\s\S]+?await wait\(delay\)/, '等待中需防止重複送出');
-assert.match(client, /正在安全排入登入/, '畫面需明確告知正在排入');
-assert.match(client, /目前登入人數較多[\s\S]+?\$\{remaining\} 秒/, '短期流量限制需用秒數告知');
-assert.match(client, /重複登入錯誤[\s\S]+?\$\{minutes\} 分鐘後再登入/, '帳號冷卻需用分鐘告知');
+assert.doesNotMatch(client, /randomizedLoginDelay|await wait\(delay\)/, '登入不得隨機延遲');
+assert.match(client, /if \(loginInFlight\) return/, '前端仍須防止重複送出登入請求');
+assert.match(client, /csrfToken = result\.csrfToken;[\s\S]+?unlock\(result\.user\)/, '登入成功須直接更新畫面');
+assert.match(client, /const result = await api\('\/api\/me'\)/, '重新開啟頁面時須恢復有效工作階段');
+assert.match(route, /tokenBucketRateLimit\('password-login:global', 500, 500\)/, '後端仍須保留單秒全站抗壓保護');
+assert.match(route, /requestedIdentity === 'developer'[\s\S]+?requestedIdentity === 'teacher'[\s\S]+?requestedIdentity === 'student'/, '後端須核對登入身分');
+for (const html of [app, legacy]) {
+  assert.match(html, /local-access\.js\?v=20260922-login-unified/);
+  assert.doesNotMatch(html, /secure-auth\.js/, '頁面只能載入一套登入控制器');
+}
 
-assert.match(route, /tokenBucketRateLimit\('password-login:global', 500, 500\)/, '後端需令牌桶限制全站每秒 500 次登入');
-assert.match(route, /ON CONFLICT\(bucket\) DO UPDATE SET[\s\S]+?RETURNING count/, '令牌扣除需以單一資料庫語句原子更新');
-assert.match(route, /password-login-account:[\s\S]+?20, LOGIN_COOLDOWN_SECONDS/, '單一帳號登入需有 5 分鐘視窗限制');
-assert.match(route, /retry-after/, '過載回應需含 Retry-After');
-assert.match(app, /local-access\.js\?v=20260921-login-5min/);
-assert.match(legacy, /local-access\.js\?v=20260921-login-5min/);
-
-console.log('登入抗壓稽核完成：前端隨機分流、重複送出保護、後端令牌桶與帳號冷卻皆已就位。');
+console.log('登入穩定稽核完成：單一控制器、立即登入、工作階段恢復與全站抗壓均已就位。');

@@ -6,7 +6,7 @@
 <script src="scoreless-ui.js?v=20260831-01" defer></script>
 <link rel="stylesheet" href="world-background.css?v=20260831-02" />
 <link rel="stylesheet" href="role-access.css?v=20260831-01" />
-<script src="local-access.js?v=20260921-login-5min" defer></script>
+<script src="local-access.js?v=20260922-login-unified" defer></script>
 <script src="remediation-plan.js?v=20260909-conceptfix"></script>
 <html lang="zh-Hant">
   <head>
@@ -60,36 +60,8 @@
         </div>
       </header>
       <section id="authGate" class="card auth-card">
-        <h2>帳號登入與申請</h2>
-        <p id="authModeLabel" class="auth-mode">安全電子郵件驗證</p>
-        <p class="source-note">
-          龍門國中學生可使用學校信箱驗證；其他學生或教師可提出帳號申請，由開發者核准與分班。
-        </p>
-        <label class="privacy-check"
-          ><input id="privacyConsent" type="checkbox" /> 我已閱讀並了解<a
-            href="privacy.html"
-            target="_blank"
-            rel="noopener"
-            >個人資料蒐集、處理及利用告知事項</a
-          >（版本 2026-09-01）。</label
-        ><label class="auth-label"
-          >電子郵件<input
-            id="studentEmail"
-            type="email"
-            autocomplete="email"
-            maxlength="254"
-            placeholder="請輸入電子郵件" /></label
-        ><button id="sendCode" class="primary">寄送驗證碼</button
-        ><label class="auth-label"
-          >驗證碼<input
-            id="studentCode"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            maxlength="6"
-            pattern="[0-9]{6}"
-            placeholder="輸入信件中的 6 位數驗證碼" /></label
-        ><button id="verifyCode" class="primary">完成驗證並進入</button>
-        <p id="authMessage" class="feedback" aria-live="polite"></p>
+        <h2>登入系統準備中</h2>
+        <p class="source-note">正在安全連線，完成後即可登入或註冊。</p>
       </section>
       <div id="studentBar" class="student-bar hidden">
         <span>目前學生：<strong id="studentAccount"></strong></span
@@ -237,7 +209,6 @@
       ><span class="animal winter-animal winter-owl">🦉</span
       ><span class="animal winter-animal winter-deer">🦌</span>
     </div>
-    <script src="secure-auth.js?v=20260920-no-workplace"></script>
     <script src="grade7-bank.js?v=20260831-01"></script>
     <script src="grade7-diverse-bank.js?v=20260831-01"></script>
     <script src="grade7-json-bank.js?v=20260909-book1-json"></script>

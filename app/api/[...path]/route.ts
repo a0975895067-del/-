@@ -5,8 +5,6 @@ type Role = 'student' | 'teacher' | 'developer' | 'approved_user';
 const PRIVACY_VERSION = '2026-09-01';
 const SESSION_SECONDS = 8 * 60 * 60;
 const REPORT_DAYS = 365;
-const LOGIN_COOLDOWN_SECONDS = 5 * 60;
-const LOGIN_COOLDOWN_MS = 5 * 60_000;
 
 class ApiError extends Error {
   constructor(message: string, public status = 400, public details: Record<string, unknown> = {}, public headers: HeadersInit = {}) { super(message); }
@@ -149,11 +147,9 @@ async function rateLimit(bucket: string, maximum: number, windowSeconds: number)
   if (Number(row.count) >= maximum) {
     const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(row.reset_at) - current) / 1000));
     const retryMinutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
-    const retryMessage = bucket.startsWith('password-login:')
-      ? `重複登入或送出次數過多，系統已暫停操作；請於 ${retryMinutes} 分鐘後再登入。`
-      : windowSeconds >= 60
-        ? `操作次數過多，請於 ${retryMinutes} 分鐘後再試。`
-        : '驗證碼寄送次數過多，請稍後再試。';
+    const retryMessage = windowSeconds >= 60
+      ? `操作次數過多，請於 ${retryMinutes} 分鐘後再試。`
+      : '驗證碼寄送次數過多，請稍後再試。';
     throw new ApiError(retryMessage, 429, { retryAfterSeconds }, { 'retry-after': String(retryAfterSeconds) });
   }
   await cf().DB.prepare('UPDATE rate_limits SET count=count+1 WHERE bucket=?').bind(bucket).run();
@@ -366,19 +362,20 @@ async function handle(request: Request) {
     if (method === 'POST' && path === '/api/auth/password-login') {
       await tokenBucketRateLimit('password-login:global', 500, 500);
       const data = await body(request), email = normalizeEmail(data.email);
-      await rateLimit(`password-login-account:${await emailLookup(email)}`, 20, LOGIN_COOLDOWN_SECONDS);
-      const user = await findUser(email), isStudent = user?.role === 'student';
-      if (!isStudent) await rateLimit(`password-login:${await ipDigest(request)}`, 20, LOGIN_COOLDOWN_SECONDS);
+      const user = await findUser(email);
       if (!user || user.status !== 'active') throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
+      const requestedIdentity = String(data.identity || '');
+      const identityMatches = requestedIdentity === 'developer'
+        ? user.role === 'developer'
+        : requestedIdentity === 'teacher'
+          ? user.role === 'teacher'
+          : requestedIdentity === 'student' && ['student', 'approved_user'].includes(user.role);
+      if (!identityMatches) throw new ApiError('帳號、密碼或身分不正確。', 401);
       const credential = await cf().DB.prepare('SELECT * FROM credentials WHERE user_id=?').bind(user.id).first<Row>();
       if (!credential) throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
-      if (!isStudent && credential.locked_until && Date.parse(credential.locked_until) > Date.now()) {
-        const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(credential.locked_until) - Date.now()) / 1000));
-        throw new ApiError('重複登入錯誤，帳號已暫停登入；請於 5 分鐘後再登入。', 423, { retryAfterSeconds }, { 'retry-after': String(retryAfterSeconds) });
-      }
       const matches = await safeEqual(credential.password_digest, await passwordDigest(String(data.password || ''), credential.password_salt));
-      if (!matches) { const failures = Number(credential.failed_attempts) + 1, locked = !isStudent && failures >= 5 ? new Date(Date.now() + LOGIN_COOLDOWN_MS).toISOString() : null; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=?,updated_at=? WHERE user_id=?').bind(failures, locked, now(), user.id).run(); if (locked) throw new ApiError('重複登入錯誤，帳號已暫停登入；請於 5 分鐘後再登入。', 423, { retryAfterSeconds: LOGIN_COOLDOWN_SECONDS }, { 'retry-after': String(LOGIN_COOLDOWN_SECONDS) }); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); }
-      if (user.role === 'developer') { const enrollment = await cf().DB.prepare('SELECT * FROM totp_enrollments WHERE user_id=? AND enabled=1').bind(user.id).first<Row>(); if (!enrollment) throw new ApiError('開發者尚未完成動態驗證器設定。', 409); const counter = await verifyTotp(await unseal(enrollment.secret_cipher), data.otp, enrollment.last_counter); if (counter == null) { const failures = Number(credential.failed_attempts) + 1, locked = failures >= 5 ? new Date(Date.now() + LOGIN_COOLDOWN_MS).toISOString() : null; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=?,updated_at=? WHERE user_id=?').bind(failures, locked, now(), user.id).run(); if (locked) throw new ApiError('重複登入錯誤，帳號已暫停登入；請於 5 分鐘後再登入。', 423, { retryAfterSeconds: LOGIN_COOLDOWN_SECONDS }, { 'retry-after': String(LOGIN_COOLDOWN_SECONDS) }); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); } await cf().DB.prepare('UPDATE totp_enrollments SET last_counter=?,updated_at=? WHERE user_id=?').bind(counter, now(), user.id).run(); }
+      if (!matches) { const failures = Number(credential.failed_attempts) + 1; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=NULL,updated_at=? WHERE user_id=?').bind(failures, now(), user.id).run(); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); }
+      if (user.role === 'developer') { const enrollment = await cf().DB.prepare('SELECT * FROM totp_enrollments WHERE user_id=? AND enabled=1').bind(user.id).first<Row>(); if (!enrollment) throw new ApiError('開發者尚未完成動態驗證器設定。', 409); const counter = await verifyTotp(await unseal(enrollment.secret_cipher), data.otp, enrollment.last_counter); if (counter == null) { const failures = Number(credential.failed_attempts) + 1; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=NULL,updated_at=? WHERE user_id=?').bind(failures, now(), user.id).run(); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); } await cf().DB.prepare('UPDATE totp_enrollments SET last_counter=?,updated_at=? WHERE user_id=?').bind(counter, now(), user.id).run(); }
       await cf().DB.prepare('UPDATE credentials SET failed_attempts=0,locked_until=NULL,updated_at=? WHERE user_id=?').bind(now(), user.id).run(); await acknowledge(user.id, data.privacyVersion); const session = await createSession(request, user); await audit(user.id, 'auth.password_login');
       return json({ user: session.user, csrfToken: session.csrfToken }, 200, { 'set-cookie': sessionCookie(session.token) });
     }

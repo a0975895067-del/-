@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs';
 
 const route = readFileSync(new URL('../app/api/[...path]/route.ts', import.meta.url), 'utf8');
 const localAccess = readFileSync(new URL('../public/local-access.js', import.meta.url), 'utf8');
-const secureAuth = readFileSync(new URL('../public/secure-auth.js', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../public/app.html', import.meta.url), 'utf8');
 const dashboard = readFileSync(new URL('../public/secure-dashboard.js', import.meta.url), 'utf8');
 
 for (let round = 1; round <= 3; round++) {
   assert.match(localAccess, /<option value="學生">學生<\/option><option value="教師">教師<\/option>/);
-  assert.match(secureAuth, /<option value="學生">學生<\/option><option value="教師">教師<\/option>/);
   assert.doesNotMatch(localAccess, /applicationNote|申請說明（選填）/);
-  assert.doesNotMatch(secureAuth, /requestJobTitle|工作職稱/);
+  assert.doesNotMatch(localAccess, /applicationPasswordConfirm|再次輸入密碼/);
+  assert.doesNotMatch(app, /secure-auth\.js/);
   assert.match(route, /\['學生', '教師'\]\.includes\(identity\)/);
   assert.match(route, /requestedIdentity === '學生' \? 'student' : requestedIdentity === '教師' \? 'teacher'/);
   assert.match(route, /核准學生前請先選擇班級/);
