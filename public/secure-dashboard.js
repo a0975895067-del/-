@@ -28,6 +28,7 @@
         orphanedReports: [],
         approvedApplicationsWithoutAccount: [],
       },
+      loadWarnings: [],
     };
   const base = () => String(window.MATH_API_BASE || '').replace(/\/$/, '');
   async function api(path, options = {}) {
@@ -49,26 +50,35 @@
   }
   const isDeveloper = () => user?.role === 'developer';
   window.MathAdminBridge = { api, getUser: () => user };
+  async function loadEndpoints(specs, required = false) {
+    const results = await Promise.allSettled(specs.map((item) => api(item.path)));
+    let loaded = 0;
+    results.forEach((result, index) => {
+      const item = specs[index];
+      if (result.status === 'fulfilled') {
+        state[item.key] = item.property ? result.value[item.property] : result.value;
+        loaded++;
+      } else {
+        state[item.key] = item.fallback;
+        state.loadWarnings.push(`${item.label}暫時無法載入：${result.reason?.message || '連線失敗'}`);
+      }
+    });
+    if (required && loaded === 0) throw new Error('後台資料暫時無法連線，請稍後重新整理。');
+  }
   async function load() {
-    const core = await Promise.all([
-      api('/api/classes'),
-      api('/api/assignments'),
-      api('/api/reports'),
-    ]);
-    state.classes = core[0].classes;
-    state.assignments = core[1].assignments;
-    state.reports = core[2].reports;
+    state.loadWarnings = [];
+    await loadEndpoints([
+      { key: 'classes', property: 'classes', path: '/api/classes', label: '班級資料', fallback: [] },
+      { key: 'assignments', property: 'assignments', path: '/api/assignments', label: '作業資料', fallback: [] },
+      { key: 'reports', property: 'reports', path: '/api/reports', label: '測驗報告', fallback: [] },
+    ], true);
     if (isDeveloper()) {
-      const extra = await Promise.all([
-        api('/api/applications'),
-        api('/api/teachers'),
-        api('/api/users'),
-        api('/api/admin/legacy-data'),
+      await loadEndpoints([
+        { key: 'applications', property: 'applications', path: '/api/applications', label: '帳號申請', fallback: [] },
+        { key: 'teachers', property: 'teachers', path: '/api/teachers', label: '教師資料', fallback: [] },
+        { key: 'users', property: 'users', path: '/api/users', label: '帳號資料', fallback: [] },
+        { key: 'legacyData', property: null, path: '/api/admin/legacy-data', label: '舊資料檢查', fallback: { unassignedUsers: [], orphanedReports: [], approvedApplicationsWithoutAccount: [] } },
       ]);
-      state.applications = extra[0].applications;
-      state.teachers = extra[1].teachers;
-      state.users = extra[2].users;
-      state.legacyData = extra[3];
     }
     state.students = {};
     await Promise.all(
@@ -77,8 +87,9 @@
           state.students[cls.id] = (
             await api(`/api/classes/${encodeURIComponent(cls.id)}/students`)
           ).students;
-        } catch {
+        } catch (error) {
           state.students[cls.id] = [];
+          state.loadWarnings.push(`班級 ${cls.code || cls.id} 學生名單暫時無法載入：${error?.message || '連線失敗'}`);
         }
       }),
     );
@@ -131,7 +142,8 @@
         .map((row) => row.id),
     );
     $('#overview').innerHTML =
-      `<h2>資料總覽</h2><div class="grid"><div class="metric"><span>可查看班級</span><strong>${state.classes.length}</strong></div><div class="metric"><span>學生人數</span><strong>${students.size}</strong></div><div class="metric"><span>測驗報告</span><strong>${state.reports.length}</strong></div><div class="metric"><span>已派作業</span><strong>${state.assignments.filter((row) => row.status === 'active').length}</strong></div>${isDeveloper() ? `<div class="metric"><span>待審申請</span><strong>${state.applications.filter((row) => row.status === 'pending').length}</strong></div>` : ''}</div>`;
+      `<h2>資料總覽</h2>${state.loadWarnings.length ? `<div class="warning"><strong>部分資料需要重新載入</strong><ul>${state.loadWarnings.map((warning) => `<li>${esc(warning)}</li>`).join('')}</ul><button id="retryDashboardLoad" type="button">重新載入後台資料</button></div>` : ''}<div class="grid"><div class="metric"><span>可查看班級</span><strong>${state.classes.length}</strong></div><div class="metric"><span>學生人數</span><strong>${students.size}</strong></div><div class="metric"><span>測驗報告</span><strong>${state.reports.length}</strong></div><div class="metric"><span>已派作業</span><strong>${state.assignments.filter((row) => row.status === 'active').length}</strong></div>${isDeveloper() ? `<div class="metric"><span>待審申請</span><strong>${state.applications.filter((row) => row.status === 'pending').length}</strong></div>` : ''}</div>`;
+    if ($('#retryDashboardLoad')) $('#retryDashboardLoad').onclick = async () => { await refresh(); };
   }
   function applications() {
     if (!isDeveloper()) return;

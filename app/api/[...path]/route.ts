@@ -365,7 +365,7 @@ async function handle(request: Request) {
       const user = await findUser(email);
       if (!user || user.status !== 'active') throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
       const credential = await cf().DB.prepare('SELECT * FROM credentials WHERE user_id=?').bind(user.id).first<Row>();
-      if (!credential) throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401);
+      if (!credential) throw new ApiError('此帳號尚未設定登入密碼。請展開「學生／教師註冊申請」補設密碼，經開發者核准後即可登入。', 409, { code: 'PASSWORD_SETUP_REQUIRED' });
       const matches = await safeEqual(credential.password_digest, await passwordDigest(String(data.password || ''), credential.password_salt));
       if (!matches) { const failures = Number(credential.failed_attempts) + 1; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=NULL,updated_at=? WHERE user_id=?').bind(failures, now(), user.id).run(); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); }
       if (user.role === 'developer') { const enrollment = await cf().DB.prepare('SELECT * FROM totp_enrollments WHERE user_id=? AND enabled=1').bind(user.id).first<Row>(); if (!enrollment) throw new ApiError('開發者尚未完成動態驗證器設定。', 409); const counter = await verifyTotp(await unseal(enrollment.secret_cipher), data.otp, enrollment.last_counter); if (counter == null) { const failures = Number(credential.failed_attempts) + 1; await cf().DB.prepare('UPDATE credentials SET failed_attempts=?,locked_until=NULL,updated_at=? WHERE user_id=?').bind(failures, now(), user.id).run(); throw new ApiError('帳號、密碼或動態驗證碼不正確。', 401); } await cf().DB.prepare('UPDATE totp_enrollments SET last_counter=?,updated_at=? WHERE user_id=?').bind(counter, now(), user.id).run(); }
