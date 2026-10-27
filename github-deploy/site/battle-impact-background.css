@@ -1,0 +1,6 @@
+#stage{position:relative;overflow:hidden}#stage canvas{will-change:transform}.battle-impact-backdrop{position:absolute;inset:0;pointer-events:none;opacity:0;overflow:hidden;--hit-x:70%;--hit-y:60%;--impact-rgb:231,164,65}
+.impact-vignette{position:absolute;inset:0;background:radial-gradient(ellipse at var(--hit-x) var(--hit-y),transparent 25%,rgba(var(--impact-rgb),.3) 100%);box-shadow:inset 0 0 55px rgba(var(--impact-rgb),.22)}
+.impact-rays{position:absolute;inset:-20%;background:repeating-conic-gradient(from 0deg at var(--hit-x) var(--hit-y),transparent 0deg 19deg,rgba(var(--impact-rgb),.25) 19deg 20deg,transparent 20deg 30deg);mask-image:radial-gradient(ellipse at var(--hit-x) var(--hit-y),transparent 12%,black 62%)}
+.impact-burst{position:absolute;left:var(--hit-x);top:var(--hit-y);width:130px;height:130px;border:3px solid rgba(var(--impact-rgb),.8);border-radius:50%;box-shadow:0 0 22px rgba(var(--impact-rgb),.45);transform:translate(-50%,-50%)}
+.impact-word{position:absolute;left:var(--hit-x);top:calc(var(--hit-y) - 80px);transform:translateX(-50%) rotate(-8deg);font-size:clamp(22px,4vw,38px);font-weight:900;color:#704328;text-shadow:1px 2px #fff9e7;white-space:nowrap}.battle-impact-backdrop[data-impact=guard] .impact-word{color:#2b6676}
+@media(prefers-reduced-motion:reduce){#stage canvas{will-change:auto}}
