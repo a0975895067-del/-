@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'site');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -104,8 +105,16 @@ for (const [grade, units] of Object.entries(grades)) {
   }
 }
 
-for (const file of fs.readdirSync(root).filter(name => name.endsWith('.js'))) {
-  new vm.Script(fs.readFileSync(path.join(root, file), 'utf8'), { filename: file });
+const battleModules = new Set(['battle-impact-background.js','battle-showcase.js','character-organic-prototypes.js','character-remaining-models.js','character-roster-3d.js','dino-continuous-skin.js','dino-skin-markings.js','orange-dino-v2.js','vendor-three/three.module.min.js','vendor-three/three.core.min.js']);
+for (const file of new Set([...fs.readdirSync(root).filter(name => name.endsWith('.js')), ...battleModules])) {
+  const source = fs.readFileSync(path.join(root, file), 'utf8');
+  if (battleModules.has(file)) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '--check'], { input: source, encoding: 'utf8' });
+    assert.equal(result.status, 0, `${file}: ${result.stderr || result.error || 'Module syntax check failed'}`);
+    for (const match of source.matchAll(/from\s*['"](\.\.?\/[^'"]+)['"]/g)) {
+      assert.ok(fs.existsSync(path.resolve(root, path.dirname(file), match[1])), `${file}: missing import ${match[1]}`);
+    }
+  } else new vm.Script(source, { filename: file });
 }
 
 const motionSource = fs.readFileSync(path.join(root, 'animal-motion.js'), 'utf8');
